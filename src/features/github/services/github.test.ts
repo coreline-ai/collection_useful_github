@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { GitHubApiError, searchPublicRepos } from './github'
+import { fetchLatestCommitSha, fetchRepo, fetchRepoDetail, GitHubApiError } from './github'
 
 const asResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), {
@@ -9,78 +9,85 @@ const asResponse = (status: number, body: unknown): Response =>
     },
   })
 
-describe('github search service', () => {
+describe('github service', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('maps GitHub public search response', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      asResponse(200, {
-        total_count: 34,
-        items: [
-          {
-            full_name: 'facebook/react',
-            owner: { login: 'facebook' },
-            name: 'react',
-            description: 'React library',
-            html_url: 'https://github.com/facebook/react',
-            language: 'TypeScript',
-            stargazers_count: 1,
-            forks_count: 1,
-            updated_at: '2026-02-16T00:00:00.000Z',
-            topics: ['react'],
-          },
-        ],
-      }),
-    )
+  it('maps repository payload to card', async () => {
+    const readmeContent = btoa('# React\nA declarative UI library')
 
-    const result = await searchPublicRepos('react', 2, 12)
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        asResponse(200, {
+          full_name: 'facebook/react',
+          owner: { login: 'facebook' },
+          name: 'react',
+          description: 'React library',
+          html_url: 'https://github.com/facebook/react',
+          homepage: 'https://react.dev',
+          language: 'TypeScript',
+          stargazers_count: 1,
+          forks_count: 2,
+          subscribers_count: 3,
+          open_issues_count: 4,
+          topics: ['react'],
+          license: { spdx_id: 'MIT', name: 'MIT License' },
+          default_branch: 'main',
+          created_at: '2026-02-16T00:00:00.000Z',
+          updated_at: '2026-02-16T00:00:00.000Z',
+        }),
+      )
+      .mockResolvedValueOnce(
+        asResponse(200, {
+          encoding: 'base64',
+          content: readmeContent,
+        }),
+      )
 
-    const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? '')
-    expect(requestedUrl).toContain('/search/repositories?')
-    expect(requestedUrl).toContain('q=react+in%3Aname%2Cdescription')
-    expect(requestedUrl).toContain('sort=stars')
-    expect(requestedUrl).toContain('order=desc')
-    expect(requestedUrl).toContain('page=2')
-    expect(requestedUrl).toContain('per_page=12')
-    expect(result.totalCount).toBe(34)
-    expect(result.page).toBe(2)
-    expect(result.hasNextPage).toBe(true)
-    expect(result.items[0]?.id).toBe('facebook/react')
+    const result = await fetchRepo('facebook', 'react')
+
+    expect(result.id).toBe('facebook/react')
+    expect(result.owner).toBe('facebook')
+    expect(result.repo).toBe('react')
+    expect(result.watchers).toBe(3)
+    expect(result.openIssues).toBe(4)
+    expect(result.summary.length).toBeGreaterThan(0)
   })
 
-  it('throws rate limit message on 403', async () => {
+  it('throws detail rate-limit message when readme/commit/issue all fail with 403', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       asResponse(403, {
         message: 'API rate limit exceeded',
       }),
     )
 
-    await expect(searchPublicRepos('react', 1, 12)).rejects.toThrow(
-      'GitHub API 요청 제한에 도달했습니다. VITE_GITHUB_TOKEN 설정을 권장합니다.',
+    await expect(fetchRepoDetail('facebook', 'react')).rejects.toThrow(
+      'GitHub API 요청 제한에 도달했습니다. `VITE_GITHUB_TOKEN`을 설정하면 README/Activity를 안정적으로 볼 수 있습니다.',
     )
   })
 
-  it('throws validation message on 422', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      asResponse(422, {
-        message: 'Validation Failed',
-      }),
-    )
-
-    await expect(searchPublicRepos('!', 1, 12)).rejects.toThrow('검색어가 유효하지 않습니다.')
-  })
-
-  it('maps timeout abort to GitHubApiError 408', async () => {
+  it('maps timeout to GitHubApiError 408', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('aborted', 'AbortError'))
 
     try {
-      await searchPublicRepos('react', 1, 12)
+      await fetchRepo('facebook', 'react')
       throw new Error('expected to throw')
     } catch (error) {
       expect(error).toBeInstanceOf(GitHubApiError)
       expect(error).toMatchObject({ status: 408 })
     }
+  })
+
+  it('returns latest commit sha when available', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, [
+        {
+          sha: 'abc123',
+        },
+      ]),
+    )
+
+    await expect(fetchLatestCommitSha('facebook', 'react')).resolves.toBe('abc123')
   })
 })

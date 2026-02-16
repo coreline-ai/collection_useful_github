@@ -1,40 +1,31 @@
-import type { FormEvent } from 'react'
-
 type RepoSearchFormProps = {
   value: string
-  loading: boolean
-  errorMessage: string | null
   onChange: (value: string) => void
-  onSubmit: () => Promise<void>
 }
 
-export const RepoSearchForm = ({ value, loading, errorMessage, onChange, onSubmit }: RepoSearchFormProps) => {
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    await onSubmit()
-  }
-
+export const RepoSearchForm = ({ value, onChange }: RepoSearchFormProps) => {
   return (
-    <form className="repo-input-form repo-search-form" onSubmit={handleSubmit}>
-      <label htmlFor="repo-public-search" className="repo-input-label">
-        GitHub 공개 저장소 검색
+    <form className="repo-input-form repo-search-form" onSubmit={(event) => event.preventDefault()}>
+      <label htmlFor="repo-local-search" className="repo-input-label">
+        등록 카드 검색
       </label>
       <div className="repo-input-controls">
         <input
-          id="repo-public-search"
-          name="repoPublicSearch"
+          id="repo-local-search"
+          name="repoLocalSearch"
           type="text"
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="예: react, nextjs, vercel"
+          placeholder="예: react, facebook, next.js"
           autoComplete="off"
-          disabled={loading}
+          aria-label="등록 카드 검색"
         />
-        <button type="submit" disabled={loading}>
-          {loading ? '검색 중...' : '검색'}
-        </button>
+        {value.trim().length > 0 ? (
+          <button type="button" onClick={() => onChange('')} aria-label="등록 카드 검색 초기화">
+            X
+          </button>
+        ) : null}
       </div>
-      {errorMessage ? <p className="inline-error">{errorMessage}</p> : null}
     </form>
   )
 }

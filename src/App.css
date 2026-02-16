@@ -457,28 +457,18 @@
   color: var(--color-danger);
 }
 
-.search-result-section {
+.local-search-notice {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  padding: 0.7rem 0.8rem;
   margin: 0 0 1rem;
 }
 
-.search-result-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.7rem;
-  margin-bottom: 0.65rem;
-}
-
-.search-result-header h2 {
-  margin: 0;
-  font-size: 1rem;
-  color: var(--text-main);
-}
-
-.search-result-header p {
+.local-search-notice p {
   margin: 0;
   font-size: 0.82rem;
-  color: var(--text-muted);
+  color: var(--text-subtle);
 }
 
 .card-grid-section {
@@ -592,6 +582,18 @@
   font-size: 0.8rem;
 }
 
+.repo-category-badge {
+  margin-top: 0.34rem;
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-soft-accent-2);
+  color: var(--text-subtle);
+  border-radius: 999px;
+  padding: 0.14rem 0.44rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
 .delete-button {
   border: 1px solid var(--color-border-strong);
   color: var(--color-danger);
@@ -659,12 +661,6 @@
   gap: 0.65rem;
 }
 
-.repo-card-footer-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
 .repo-card-footer a,
 .detail-button {
   font-size: 0.78rem;
@@ -679,19 +675,11 @@
   padding: 0.36rem 0.62rem;
 }
 
-.add-button {
-  border: none;
-  border-radius: 9px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 0.36rem 0.62rem;
-  color: var(--color-accent-on);
-  background: linear-gradient(130deg, var(--color-accent), var(--color-accent-strong));
-}
-
-.add-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.repo-search-form .repo-input-controls button {
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-1);
+  color: var(--text-subtle);
+  padding: 0 0.85rem;
 }
 
 .pagination {
@@ -1292,11 +1280,6 @@
     align-items: flex-start;
   }
 
-  .search-result-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.3rem;
-  }
 }
 
 @keyframes cardIn {

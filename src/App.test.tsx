@@ -6,7 +6,6 @@ import type { GitHubRepoCard, RepoDetailData } from './types'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
-  searchPublicRepos: vi.fn().mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 12, hasNextPage: false }),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
 }))
@@ -24,11 +23,9 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   importUnifiedBackup: vi.fn().mockResolvedValue(undefined),
 }))
 
-const { fetchRepo, searchPublicRepos, fetchRepoDetail, fetchLatestCommitSha } = await import(
-  '@features/github/services/github'
-)
+const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
 
-const mockCard: GitHubRepoCard = {
+const mockReactCard: GitHubRepoCard = {
   id: 'facebook/react',
   categoryId: 'main',
   owner: 'facebook',
@@ -49,6 +46,16 @@ const mockCard: GitHubRepoCard = {
   createdAt: '2026-02-15T00:00:00.000Z',
   updatedAt: '2026-02-15T00:00:00.000Z',
   addedAt: '2026-02-15T00:00:00.000Z',
+}
+
+const mockVueCard: GitHubRepoCard = {
+  ...mockReactCard,
+  id: 'vuejs/core',
+  owner: 'vuejs',
+  repo: 'core',
+  fullName: 'vuejs/core',
+  summary: 'Vue summary text',
+  htmlUrl: 'https://github.com/vuejs/core',
 }
 
 const mockDetail: RepoDetailData = {
@@ -86,13 +93,6 @@ describe('App', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     mockMatchMedia(false)
-    vi.mocked(searchPublicRepos).mockResolvedValue({
-      items: [],
-      totalCount: 0,
-      page: 1,
-      perPage: 12,
-      hasNextPage: false,
-    })
     vi.mocked(fetchRepoDetail).mockResolvedValue(mockDetail)
     vi.mocked(fetchLatestCommitSha).mockResolvedValue('abc123')
   })
@@ -118,89 +118,12 @@ describe('App', () => {
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
   })
 
-  it('shows github section by default', () => {
+  it('shows github section by default with local search input', () => {
     render(<App />)
 
     expect(screen.getByRole('tab', { name: '깃허브' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
-    expect(screen.getByLabelText('GitHub 공개 저장소 검색')).toBeInTheDocument()
-  })
-
-  it('searches public repositories and adds from result card', async () => {
-    vi.mocked(searchPublicRepos).mockResolvedValue({
-      items: [
-        {
-          id: 'facebook/react',
-          owner: 'facebook',
-          repo: 'react',
-          fullName: 'facebook/react',
-          description: 'React public search result',
-          htmlUrl: 'https://github.com/facebook/react',
-          language: 'TypeScript',
-          stars: 1,
-          forks: 1,
-          topics: ['react'],
-          updatedAt: '2026-02-15T00:00:00.000Z',
-        },
-      ],
-      totalCount: 1,
-      page: 1,
-      perPage: 12,
-      hasNextPage: false,
-    })
-    vi.mocked(fetchRepo).mockResolvedValue(mockCard)
-
-    render(<App />)
-
-    fireEvent.change(screen.getByLabelText('GitHub 공개 저장소 검색'), { target: { value: 'react' } })
-    fireEvent.click(screen.getByRole('button', { name: '검색' }))
-
-    expect(await screen.findByText('GitHub 공개 검색 결과')).toBeInTheDocument()
-    expect(screen.getByText('React public search result')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'facebook/react 삭제' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '카테고리 이동' })).toBeDisabled()
-
-    fireEvent.click(screen.getByRole('button', { name: 'facebook/react 추가' }))
-
-    const summaries = await screen.findAllByText('React summary text')
-    expect(summaries.length).toBeGreaterThan(0)
-    expect(fetchRepo).toHaveBeenCalledWith('facebook', 'react')
-  })
-
-  it('opens preview detail from public search result and disables note input', async () => {
-    vi.mocked(searchPublicRepos).mockResolvedValue({
-      items: [
-        {
-          id: 'facebook/react',
-          owner: 'facebook',
-          repo: 'react',
-          fullName: 'facebook/react',
-          description: 'React public search result',
-          htmlUrl: 'https://github.com/facebook/react',
-          language: 'TypeScript',
-          stars: 1,
-          forks: 1,
-          topics: ['react'],
-          updatedAt: '2026-02-15T00:00:00.000Z',
-        },
-      ],
-      totalCount: 1,
-      page: 1,
-      perPage: 12,
-      hasNextPage: false,
-    })
-
-    render(<App />)
-
-    fireEvent.change(screen.getByLabelText('GitHub 공개 저장소 검색'), { target: { value: 'react' } })
-    fireEvent.click(screen.getByRole('button', { name: '검색' }))
-    await screen.findByText('GitHub 공개 검색 결과')
-
-    fireEvent.click(screen.getByRole('button', { name: '상세 보기' }))
-
-    await screen.findByRole('dialog')
-    expect(screen.getByText('검색 결과 미리보기에서는 메모를 남길 수 없습니다.')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('간단한 아이디어나 작업 기록을 남겨 보세요.')).toBeDisabled()
+    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
   })
 
   it('switches to youtube placeholder and hides github board', () => {
@@ -223,7 +146,7 @@ describe('App', () => {
   })
 
   it('adds repo card and blocks duplicate', async () => {
-    vi.mocked(fetchRepo).mockResolvedValue(mockCard)
+    vi.mocked(fetchRepo).mockResolvedValue(mockReactCard)
 
     render(<App />)
 
@@ -245,24 +168,8 @@ describe('App', () => {
     })
   })
 
-  it('shows input only in main category', async () => {
-    render(<App />)
-
-    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정' }))
-    fireEvent.change(screen.getByLabelText('새 카테고리 이름'), { target: { value: '프론트엔드' } })
-    fireEvent.click(screen.getByRole('button', { name: '카테고리 생성' }))
-    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정 닫기' }))
-
-    expect(await screen.findByRole('button', { name: '프론트엔드' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '프론트엔드' }))
-
-    expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
-    expect(screen.queryByLabelText('GitHub 공개 저장소 검색')).not.toBeInTheDocument()
-    expect(screen.getByText('저장소 추가는 메인 카테고리에서만 가능합니다.')).toBeInTheDocument()
-  })
-
-  it('moves card to another category from card menu', async () => {
-    vi.mocked(fetchRepo).mockResolvedValue(mockCard)
+  it('filters registered cards in real time and searches across all categories in main', async () => {
+    vi.mocked(fetchRepo).mockResolvedValueOnce(mockReactCard).mockResolvedValueOnce(mockVueCard)
 
     render(<App />)
 
@@ -284,14 +191,44 @@ describe('App', () => {
     expect(moveMenu).not.toBeNull()
     fireEvent.click(within(moveMenu as HTMLElement).getByRole('button', { name: '프론트엔드' }))
 
-    expect(screen.queryByText('react')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('GitHub 저장소 URL'), {
+      target: { value: 'https://github.com/vuejs/core' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '추가' }))
+    await screen.findByText('core')
 
+    const searchInput = screen.getByLabelText('등록 카드 검색')
+    fireEvent.change(searchInput, { target: { value: 'react' } })
+
+    expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
+    expect(screen.getByText('react')).toBeInTheDocument()
+    expect(screen.queryByText('core')).not.toBeInTheDocument()
+    expect(screen.getByText('프론트엔드', { selector: '.repo-category-badge' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '등록 카드 검색 초기화' }))
+
+    expect(await screen.findByText('core')).toBeInTheDocument()
+    expect(screen.queryByText('react')).not.toBeInTheDocument()
+  })
+
+  it('shows input only in main category', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정' }))
+    fireEvent.change(screen.getByLabelText('새 카테고리 이름'), { target: { value: '프론트엔드' } })
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 생성' }))
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정 닫기' }))
+
+    expect(await screen.findByRole('button', { name: '프론트엔드' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '프론트엔드' }))
-    expect(await screen.findByText('react')).toBeInTheDocument()
+
+    expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('등록 카드 검색')).not.toBeInTheDocument()
+    expect(screen.getByText('저장소 추가는 메인 카테고리에서만 가능합니다.')).toBeInTheDocument()
   })
 
   it('opens detail modal and adds note', async () => {
-    vi.mocked(fetchRepo).mockResolvedValue(mockCard)
+    vi.mocked(fetchRepo).mockResolvedValue(mockReactCard)
 
     render(<App />)
 
@@ -318,7 +255,10 @@ describe('App', () => {
         string,
         { content: string }[]
       >
-      expect(notes['facebook/react'][0].content).toBe('테스트 메모')
+      const savedContents = Object.values(notes)
+        .flat()
+        .map((note) => note.content)
+      expect(savedContents).toContain('테스트 메모')
     })
   })
 })

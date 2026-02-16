@@ -5,7 +5,6 @@ import { AppShell } from './AppShell'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
-  searchPublicRepos: vi.fn().mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 12, hasNextPage: false }),
   fetchRepoDetail: vi.fn().mockResolvedValue({ readmePreview: null, recentActivity: [] }),
   fetchLatestCommitSha: vi.fn().mockResolvedValue(null),
 }))
