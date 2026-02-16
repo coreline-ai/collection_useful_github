@@ -9,11 +9,15 @@ export const UNIFIED_ITEMS_STORAGE_KEY = 'unified_items_v1'
 export const UNIFIED_INDEXES_STORAGE_KEY = 'unified_indexes_v1'
 export const UNIFIED_META_STORAGE_KEY = 'unified_meta_v1'
 export const UNIFIED_NOTES_STORAGE_KEY = 'unified_notes_v1'
+export const UNIFIED_RECENT_QUERIES_STORAGE_KEY = 'unified_recent_queries_v1'
 
 export const CARDS_PER_PAGE = 12
 export const GRID_COLUMNS_DESKTOP = 4
 export const MAX_NOTE_LENGTH = 500
 export const DETAIL_CACHE_TTL_HOURS = 24
+export const UNIFIED_SEARCH_CACHE_TTL_MS = 60_000
+export const UNIFIED_SEARCH_CACHE_MAX_ENTRIES = 50
+export const UNIFIED_RECENT_QUERIES_MAX_ENTRIES = 20
 export const DEFAULT_MAIN_CATEGORY_ID = 'main'
 export const DEFAULT_WAREHOUSE_CATEGORY_ID = 'warehouse'
 export const CATEGORY_NAME_MAX_LENGTH = 30

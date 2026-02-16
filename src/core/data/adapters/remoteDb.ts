@@ -15,6 +15,10 @@ export type UnifiedSearchParams = {
   provider?: ProviderType | 'all'
   type?: UnifiedItemType | 'all'
   limit?: number
+  mode?: 'relevance' | 'legacy'
+  fuzzy?: boolean
+  prefix?: boolean
+  minScore?: number
 }
 
 export type UnifiedBackupPayload = {
@@ -381,6 +385,22 @@ export const searchUnifiedItems = async (params: UnifiedSearchParams): Promise<U
   }
 
   search.set('limit', String(params.limit ?? 50))
+
+  if (params.mode) {
+    search.set('mode', params.mode)
+  }
+
+  if (typeof params.fuzzy === 'boolean') {
+    search.set('fuzzy', String(params.fuzzy))
+  }
+
+  if (typeof params.prefix === 'boolean') {
+    search.set('prefix', String(params.prefix))
+  }
+
+  if (typeof params.minScore === 'number' && Number.isFinite(params.minScore)) {
+    search.set('min_score', String(params.minScore))
+  }
 
   const response = await requestWithRetry(`/api/search?${search.toString()}`)
 

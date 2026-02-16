@@ -1,4 +1,16 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+
+CREATE OR REPLACE FUNCTION immutable_unaccent(input_text TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+BEGIN
+  RETURN unaccent('public.unaccent', COALESCE(input_text, ''));
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS unified_items (
   id TEXT PRIMARY KEY,
@@ -43,6 +55,25 @@ CREATE INDEX IF NOT EXISTS idx_unified_items_summary_trgm
 
 CREATE INDEX IF NOT EXISTS idx_unified_items_description_trgm
   ON unified_items USING GIN (description gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_title_lower_trgm
+  ON unified_items USING GIN (lower(title) gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_summary_lower_trgm
+  ON unified_items USING GIN (lower(summary) gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_description_lower_trgm
+  ON unified_items USING GIN (lower(description) gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_search_vector
+  ON unified_items
+  USING GIN (
+    (
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(title, '')))), 'A') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(summary, '')))), 'B') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(description, '')))), 'C')
+    )
+  );
 
 CREATE TABLE IF NOT EXISTS unified_notes (
   id TEXT PRIMARY KEY,

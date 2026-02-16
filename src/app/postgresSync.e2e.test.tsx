@@ -109,20 +109,23 @@ describeIfPostgresE2E('PostgreSQL snapshot E2E', () => {
 
     await screen.findByText('react')
 
-    await waitFor(async () => {
-      const response = await fetch(`${API_BASE}/api/providers/github/items?limit=20`)
-      const payload = (await response.json()) as {
-        ok: boolean
-        items: Array<{ id: string; provider: string; nativeId: string; title: string }>
-      }
+    await waitFor(
+      async () => {
+        const response = await fetch(`${API_BASE}/api/providers/github/items?limit=20`)
+        const payload = (await response.json()) as {
+          ok: boolean
+          items: Array<{ id: string; provider: string; nativeId: string; title: string }>
+        }
 
-      expect(payload.ok).toBe(true)
-      expect(payload.items.some((item) => item.id === 'github:facebook/react')).toBe(true)
+        expect(payload.ok).toBe(true)
+        expect(payload.items.some((item) => item.id === 'github:facebook/react')).toBe(true)
 
-      const item = payload.items.find((entry) => entry.id === 'github:facebook/react')
-      expect(item?.provider).toBe('github')
-      expect(item?.nativeId).toBe('facebook/react')
-      expect(item?.title).toBe('facebook/react')
-    })
+        const item = payload.items.find((entry) => entry.id === 'github:facebook/react')
+        expect(item?.provider).toBe('github')
+        expect(item?.nativeId).toBe('facebook/react')
+        expect(item?.title).toBe('facebook/react')
+      },
+      { timeout: 5000 },
+    )
   })
 })

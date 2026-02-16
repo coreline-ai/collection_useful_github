@@ -1,6 +1,6 @@
 export type ThemeMode = 'light' | 'dark'
-export type TopSection = 'github' | 'youtube' | 'bookmark'
-export type ProviderType = TopSection
+export type TopSection = 'search' | 'github' | 'youtube' | 'bookmark'
+export type ProviderType = 'github' | 'youtube' | 'bookmark'
 export type UnifiedItemType = 'repository' | 'video' | 'bookmark'
 export type UnifiedStatus = 'active' | 'archived'
 
@@ -99,6 +99,8 @@ export type UnifiedItem = {
   updatedAt: string
   savedAt: string
   raw: Record<string, unknown>
+  score?: number
+  matchedBy?: Array<'exact' | 'prefix' | 'fts' | 'trgm'>
 }
 
 export type UnifiedIndex = {

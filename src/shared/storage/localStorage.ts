@@ -124,7 +124,7 @@ export const loadTopSection = (): TopSection | null => {
 
   const value = window.localStorage.getItem(TOP_SECTION_STORAGE_KEY)
 
-  if (value === 'github' || value === 'youtube' || value === 'bookmark') {
+  if (value === 'search' || value === 'github' || value === 'youtube' || value === 'bookmark') {
     return value
   }
 

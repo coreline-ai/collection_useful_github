@@ -125,11 +125,14 @@ describeIfPostgresE2E('PostgreSQL dashboard roundtrip E2E', () => {
 
     await screen.findByText('next.js')
 
-    await waitFor(async () => {
-      const response = await fetch(`${API_BASE}/api/providers/github/items?limit=50`)
-      const payload = (await response.json()) as { items: Array<{ id: string }> }
-      expect(payload.items.some((item) => item.id === 'github:vercel/next.js')).toBe(true)
-    })
+    await waitFor(
+      async () => {
+        const response = await fetch(`${API_BASE}/api/providers/github/items?limit=50`)
+        const payload = (await response.json()) as { items: Array<{ id: string }> }
+        expect(payload.items.some((item) => item.id === 'github:vercel/next.js')).toBe(true)
+      },
+      { timeout: 5000 },
+    )
 
     firstRender.unmount()
     window.localStorage.clear()

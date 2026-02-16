@@ -71,6 +71,39 @@ describe('remoteDb adapter', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('forwards relevance search options to api query params', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        items: [],
+      }),
+    )
+
+    await searchUnifiedItems({
+      query: 'react',
+      provider: 'github',
+      type: 'repository',
+      limit: 40,
+      mode: 'relevance',
+      fuzzy: true,
+      prefix: true,
+      minScore: 0.5,
+    })
+
+    const requestedUrl = String(fetchMock.mock.calls[0]?.[0] ?? '')
+    expect(requestedUrl).toContain('/api/search?')
+    expect(requestedUrl).toContain('q=react')
+    expect(requestedUrl).toContain('provider=github')
+    expect(requestedUrl).toContain('type=repository')
+    expect(requestedUrl).toContain('limit=40')
+    expect(requestedUrl).toContain('mode=relevance')
+    expect(requestedUrl).toContain('fuzzy=true')
+    expect(requestedUrl).toContain('prefix=true')
+    expect(requestedUrl).toContain('min_score=0.5')
+  })
+
   it('falls back to legacy dashboard load when new endpoint is missing', async () => {
     vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
 

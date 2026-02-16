@@ -56,6 +56,23 @@ const searchRateLimitMap = new Map()
 const SEARCH_LIMIT_WINDOW_MS = 60 * 1000
 const SEARCH_LIMIT_MAX = 60
 
+const parseBoolean = (value, fallback = false) => {
+  if (typeof value !== 'string') {
+    return fallback
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'true') {
+    return true
+  }
+
+  if (normalized === 'false') {
+    return false
+  }
+
+  return fallback
+}
+
 const applySearchRateLimit = (req, _res, next) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown'
   const now = Date.now()
@@ -779,6 +796,12 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
     const provider = typeof req.query.provider === 'string' ? req.query.provider.trim() : ''
     const type = typeof req.query.type === 'string' ? req.query.type.trim() : ''
+    const modeRaw = typeof req.query.mode === 'string' ? req.query.mode.trim().toLowerCase() : ''
+    const mode = modeRaw === 'legacy' ? 'legacy' : modeRaw === '' || modeRaw === 'relevance' ? 'relevance' : null
+    const fuzzyEnabled = parseBoolean(typeof req.query.fuzzy === 'string' ? req.query.fuzzy : undefined, true)
+    const prefixEnabled = parseBoolean(typeof req.query.prefix === 'string' ? req.query.prefix : undefined, true)
+    const minScoreRaw = Number(req.query.min_score || 0)
+    const minScore = Number.isFinite(minScoreRaw) ? minScoreRaw : 0
     const limit = Math.min(Math.max(Number(req.query.limit || 50), 1), 200)
 
     if (!q) {
@@ -796,13 +819,147 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
       throw error
     }
 
+    if (!mode) {
+      const error = new Error('invalid mode')
+      error.status = 400
+      throw error
+    }
+
+    if (mode === 'legacy') {
+      const result = await query(
+        `
+          SELECT
+            id,
+            provider,
+            type,
+            native_id AS "nativeId",
+            title,
+            summary,
+            description,
+            url,
+            tags,
+            author,
+            language,
+            metrics,
+            status,
+            created_at AS "createdAt",
+            updated_at AS "updatedAt",
+            saved_at AS "savedAt",
+            raw
+          FROM unified_items
+          WHERE ($1::text = '' OR provider = $1)
+            AND ($2::text = '' OR type = $2)
+            AND (
+              title ILIKE '%' || $3 || '%'
+              OR summary ILIKE '%' || $3 || '%'
+              OR description ILIKE '%' || $3 || '%'
+              OR array_to_string(tags, ' ') ILIKE '%' || $3 || '%'
+            )
+          ORDER BY updated_at DESC
+          LIMIT $4
+        `,
+        [provider, type, q, limit],
+      )
+
+      res.json({ ok: true, items: result.rows })
+      return
+    }
+
     const result = await query(
       `
+        WITH search_params AS (
+          SELECT
+            immutable_unaccent(lower($3::text)) AS normalized_q,
+            CASE
+              WHEN btrim(regexp_replace(immutable_unaccent(lower($3::text)), '[^[:alnum:][:space:]_]+', ' ', 'g')) = ''
+                THEN NULL::tsquery
+              ELSE websearch_to_tsquery(
+                'simple',
+                regexp_replace(immutable_unaccent(lower($3::text)), '[^[:alnum:][:space:]_]+', ' ', 'g')
+              )
+            END AS fts_query,
+            CASE
+              WHEN char_length(immutable_unaccent(lower($3::text))) >= 4 THEN 0.1
+              WHEN char_length(immutable_unaccent(lower($3::text))) >= 2 THEN 0.16
+              ELSE 1.0
+            END AS typo_threshold
+        ),
+        base AS (
+          SELECT
+            ui.id,
+            ui.provider,
+            ui.type,
+            ui.native_id AS "nativeId",
+            ui.title,
+            ui.summary,
+            ui.description,
+            ui.url,
+            ui.tags,
+            ui.author,
+            ui.language,
+            ui.metrics,
+            ui.status,
+            ui.created_at AS "createdAt",
+            ui.updated_at AS "updatedAt",
+            ui.saved_at AS "savedAt",
+            ui.raw,
+            ui.updated_at AS updated_at_raw,
+            immutable_unaccent(lower(COALESCE(ui.title, ''))) AS normalized_title,
+            immutable_unaccent(lower(COALESCE(ui.summary, ''))) AS normalized_summary,
+            immutable_unaccent(lower(COALESCE(ui.description, ''))) AS normalized_description,
+            sp.normalized_q,
+            sp.fts_query,
+            sp.typo_threshold
+          FROM unified_items ui
+          CROSS JOIN search_params sp
+          WHERE ($1::text = '' OR ui.provider = $1)
+            AND ($2::text = '' OR ui.type = $2)
+        ),
+        ranked AS (
+          SELECT
+            base.*,
+            (
+              setweight(to_tsvector('simple'::regconfig, base.normalized_title), 'A') ||
+              setweight(to_tsvector('simple'::regconfig, base.normalized_summary), 'B') ||
+              setweight(to_tsvector('simple'::regconfig, base.normalized_description), 'C')
+            ) AS search_vector,
+            (
+              base.normalized_title = base.normalized_q
+              OR lower(COALESCE(base."nativeId", '')) = base.normalized_q
+            ) AS exact_hit,
+            (base.normalized_title LIKE base.normalized_q || '%') AS prefix_hit,
+            GREATEST(
+              similarity(base.normalized_title, base.normalized_q),
+              similarity(base.normalized_summary, base.normalized_q),
+              similarity(base.normalized_description, base.normalized_q),
+              word_similarity(base.normalized_title, base.normalized_q),
+              word_similarity(base.normalized_summary, base.normalized_q),
+              word_similarity(base.normalized_description, base.normalized_q)
+            ) AS trgm_similarity,
+            1.0 / (1.0 + (EXTRACT(EPOCH FROM (NOW() - base.updated_at_raw)) / 86400.0)) AS recency_boost
+          FROM base
+        ),
+        scored AS (
+          SELECT
+            ranked.*,
+            (ranked.fts_query IS NOT NULL AND ranked.search_vector @@ ranked.fts_query) AS fts_hit,
+            (
+              CASE
+                WHEN ranked.fts_query IS NULL THEN 0.0
+                ELSE ts_rank_cd(ranked.search_vector, ranked.fts_query)
+              END
+            ) AS fts_rank,
+            (
+              char_length(ranked.normalized_q) >= 2
+              AND ranked.trgm_similarity >= ranked.typo_threshold
+            ) AS trgm_hit
+          FROM ranked
+        )
         SELECT
           id,
           provider,
           type,
-          native_id AS "nativeId",
+          "nativeId",
           title,
           summary,
           description,
@@ -812,23 +969,46 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
           language,
           metrics,
           status,
-          created_at AS "createdAt",
-          updated_at AS "updatedAt",
-          saved_at AS "savedAt",
-          raw
-        FROM unified_items
-        WHERE ($1::text = '' OR provider = $1)
-          AND ($2::text = '' OR type = $2)
-          AND (
-            title ILIKE '%' || $3 || '%'
-            OR summary ILIKE '%' || $3 || '%'
-            OR description ILIKE '%' || $3 || '%'
-            OR array_to_string(tags, ' ') ILIKE '%' || $3 || '%'
+          "createdAt",
+          "updatedAt",
+          "savedAt",
+          raw,
+          (
+            (CASE WHEN exact_hit THEN 5.0 ELSE 0.0 END) +
+            (CASE WHEN prefix_hit AND $6::boolean THEN 2.5 ELSE 0.0 END) +
+            (CASE WHEN fts_hit THEN (fts_rank * 1.8) ELSE 0.0 END) +
+            (CASE WHEN trgm_hit AND $7::boolean THEN (trgm_similarity * 1.2) ELSE 0.0 END) +
+            (recency_boost * 0.4)
+          ) AS score,
+          ARRAY_REMOVE(
+            ARRAY[
+              CASE WHEN exact_hit THEN 'exact' END,
+              CASE WHEN prefix_hit AND $6::boolean THEN 'prefix' END,
+              CASE WHEN fts_hit THEN 'fts' END,
+              CASE WHEN trgm_hit AND $7::boolean THEN 'trgm' END
+            ],
+            NULL
+          ) AS "matchedBy"
+        FROM scored
+        WHERE (
+            exact_hit
+            OR fts_hit
+            OR (prefix_hit AND $6::boolean)
+            OR (trgm_hit AND $7::boolean)
           )
-        ORDER BY updated_at DESC
+          AND (
+            (
+              (CASE WHEN exact_hit THEN 5.0 ELSE 0.0 END) +
+              (CASE WHEN prefix_hit AND $6::boolean THEN 2.5 ELSE 0.0 END) +
+              (CASE WHEN fts_hit THEN (fts_rank * 1.8) ELSE 0.0 END) +
+              (CASE WHEN trgm_hit AND $7::boolean THEN (trgm_similarity * 1.2) ELSE 0.0 END) +
+              (recency_boost * 0.4)
+            ) >= $5::double precision
+          )
+        ORDER BY score DESC, "updatedAt" DESC
         LIMIT $4
       `,
-      [provider, type, q, limit],
+      [provider, type, q, limit, minScore, prefixEnabled, fuzzyEnabled],
     )
 
     res.json({ ok: true, items: result.rows })
