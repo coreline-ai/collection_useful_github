@@ -18,6 +18,13 @@
   - 카드/메모/카테고리/테마 저장
 - `client/src/storage/detailCache.ts`
   - 상세 캐시 저장/조회/TTL 정리
+- `client/src/features/youtube/services/youtube.ts`
+  - YouTube URL 파서(`watch/youtu.be/shorts`)
+  - 서버 경유 YouTube 메타 조회
+- `client/src/features/youtube/state/dashboardReducer.ts`
+  - YouTube 카드/카테고리/페이지네이션 상태 관리
+- `client/src/features/youtube/entry.tsx`
+  - YouTube 보드 UI(추가/검색/카테고리/카드)
 - `client/src/utils/theme.ts`
   - OS 다크모드 감지
   - 저장값 + 시스템값 기반 초기 테마 결정
@@ -90,6 +97,16 @@ ThemeMode = 'light' | 'dark'
   - `VITE_GITHUB_TIMEOUT_SECONDS`
   - `GLM_API_KEY`, `GLM_BASE_URL`, `GLM_MODEL`, `GLM_TIMEOUT_SECONDS`
   - `VITE_OPENAI_API_KEY`, `VITE_OPENAI_MODEL`, `VITE_OPENAI_TIMEOUT_SECONDS`
+  - `YOUTUBE_API_KEY` (server)
+  - `YOUTUBE_API_TIMEOUT_SECONDS` (server)
+
+### YouTube 서버 API
+- `GET /api/youtube/videos/:videoId`
+  - YouTube Data API v3 조회 후 카드 메타 반환
+- `GET /api/youtube/dashboard`
+  - YouTube 탭 카드/카테고리 스냅샷 로드
+- `PUT /api/youtube/dashboard`
+  - YouTube 탭 카드/카테고리 스냅샷 저장
 
 ## 6. 번역 동작
 - 자동 번역 없음
@@ -109,8 +126,10 @@ ThemeMode = 'light' | 'dark'
 - 마크다운 렌더 및 sanitize 테스트
 - 번역 서비스 fallback 테스트
 - App 통합 테스트(등록/중복/상세/메모)
+- YouTube 통합 테스트(탭 전환/영상 추가/로컬검색/카테고리)
 - 테마 유틸 단위 테스트(저장값 우선/OS 감지)
 - 테마 저장 유틸 테스트(localStorage 손상값 fallback)
+- Postgres E2E(YouTube 카드 추가 후 `provider='youtube'` 영속화 검증)
 
 ## 9. 운영 가이드
 - Rate limit 완화를 위해 `VITE_GITHUB_TOKEN` 설정 권장

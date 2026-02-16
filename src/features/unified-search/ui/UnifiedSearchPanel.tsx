@@ -87,6 +87,7 @@ export const UnifiedSearchPanel = ({
             FTS(Full-Text Search, 전문 검색)는 tsvector(검색용 토큰 벡터)와 tsquery(질의)를 사용해 제목/요약/설명의
             의미 일치를 계산합니다.
           </li>
+          <li>YouTube 항목은 채널명(author)과 영상 ID(nativeId)도 함께 검색합니다.</li>
           <li>prefix(접두사) 매칭은 title이 검색어로 시작하는지 검사해 초반 입력 검색(예: rea)을 빠르게 맞춥니다.</li>
           <li>
             trigram(3글자 조각) 오탈자 보정은 similarity/word_similarity로 철자 오차(예: raect)까지 유사도를 계산합니다.

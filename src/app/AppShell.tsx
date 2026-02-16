@@ -11,12 +11,24 @@ import {
   saveTopSection,
   saveThemeMode,
 } from '@shared/storage/localStorage'
-import type { ThemeMode, TopSection } from '@shared/types'
+import type { SyncConnectionStatus, ThemeMode, TopSection } from '@shared/types'
 import { resolveInitialTheme } from '@utils/theme'
+
+type SyncSnapshot = {
+  status: SyncConnectionStatus
+  lastSuccessAt: string | null
+}
+
+const INITIAL_SYNC_SNAPSHOT: SyncSnapshot = {
+  status: 'healthy',
+  lastSuccessAt: null,
+}
 
 export const AppShell = () => {
   const [activeTopSection, setActiveTopSection] = useState<TopSection>(() => loadTopSection() ?? 'github')
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => resolveInitialTheme(loadThemeMode()))
+  const [githubSync, setGithubSync] = useState<SyncSnapshot>(INITIAL_SYNC_SNAPSHOT)
+  const [youtubeSync, setYoutubeSync] = useState<SyncSnapshot>(INITIAL_SYNC_SNAPSHOT)
 
   useEffect(() => {
     runInitialMigrations()
@@ -31,9 +43,16 @@ export const AppShell = () => {
     saveThemeMode(themeMode)
   }, [themeMode])
 
+  const activeSync = activeTopSection === 'github' ? githubSync : activeTopSection === 'youtube' ? youtubeSync : null
+
   return (
     <div className="app-shell">
-      <TopSectionNav activeSection={activeTopSection} onChangeSection={setActiveTopSection} />
+      <TopSectionNav
+        activeSection={activeTopSection}
+        onChangeSection={setActiveTopSection}
+        syncStatus={activeSync?.status}
+        lastSyncSuccessAt={activeSync?.lastSuccessAt}
+      />
 
       <section
         className="top-section-panel"
@@ -47,9 +66,16 @@ export const AppShell = () => {
         <GithubFeatureEntry
           themeMode={themeMode}
           onToggleTheme={() => setThemeMode((current) => (current === 'light' ? 'dark' : 'light'))}
+          onSyncStatusChange={setGithubSync}
         />
       ) : null}
-      {activeTopSection === 'youtube' ? <YoutubeFeatureEntry /> : null}
+      {activeTopSection === 'youtube' ? (
+        <YoutubeFeatureEntry
+          themeMode={themeMode}
+          onToggleTheme={() => setThemeMode((current) => (current === 'light' ? 'dark' : 'light'))}
+          onSyncStatusChange={setYoutubeSync}
+        />
+      ) : null}
       {activeTopSection === 'bookmark' ? <BookmarkFeatureEntry /> : null}
     </div>
   )

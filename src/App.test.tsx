@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { THEME_STORAGE_KEY, TOP_SECTION_STORAGE_KEY } from './constants'
-import type { GitHubRepoCard, RepoDetailData } from './types'
+import type { GitHubRepoCard, RepoDetailData, YouTubeVideoCard } from './types'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
@@ -10,10 +10,19 @@ vi.mock('@features/github/services/github', () => ({
   fetchLatestCommitSha: vi.fn(),
 }))
 
+vi.mock('@features/youtube/services/youtube', () => ({
+  parseYouTubeVideoUrl: vi.fn(),
+  fetchYouTubeVideo: vi.fn(),
+  buildYouTubeSummary: vi.fn((value: string) => value),
+}))
+
 vi.mock('@core/data/adapters/remoteDb', () => ({
   isRemoteSnapshotEnabled: vi.fn(() => false),
+  getRemoteBaseUrl: vi.fn(() => null),
   loadGithubDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
+  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   searchUnifiedItems: vi.fn().mockResolvedValue([]),
   exportUnifiedBackup: vi.fn().mockResolvedValue({
     version: 1,
@@ -24,6 +33,14 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
 }))
 
 const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
+const { parseYouTubeVideoUrl, fetchYouTubeVideo } = await import('@features/youtube/services/youtube')
+const {
+  isRemoteSnapshotEnabled,
+  loadGithubDashboardFromRemote,
+  saveGithubDashboardToRemote,
+  loadYoutubeDashboardFromRemote,
+  saveYoutubeDashboardToRemote,
+} = await import('@core/data/adapters/remoteDb')
 
 const mockReactCard: GitHubRepoCard = {
   id: 'facebook/react',
@@ -72,6 +89,22 @@ const mockDetail: RepoDetailData = {
   ],
 }
 
+const mockYoutubeCard: YouTubeVideoCard = {
+  id: 'dQw4w9WgXcQ',
+  videoId: 'dQw4w9WgXcQ',
+  categoryId: 'main',
+  title: 'Never Gonna Give You Up',
+  channelTitle: 'Rick Astley',
+  description: 'Official music video',
+  thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+  videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+  publishedAt: '2026-02-15T00:00:00.000Z',
+  viewCount: 100,
+  likeCount: 5,
+  addedAt: '2026-02-15T00:00:00.000Z',
+  updatedAt: '2026-02-15T00:00:00.000Z',
+}
+
 const mockMatchMedia = (matches: boolean) => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -93,8 +126,17 @@ describe('App', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     mockMatchMedia(false)
+    vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(false)
+    vi.mocked(loadGithubDashboardFromRemote).mockResolvedValue(null)
+    vi.mocked(saveGithubDashboardToRemote).mockResolvedValue(undefined)
+    vi.mocked(loadYoutubeDashboardFromRemote).mockResolvedValue(null)
+    vi.mocked(saveYoutubeDashboardToRemote).mockResolvedValue(undefined)
     vi.mocked(fetchRepoDetail).mockResolvedValue(mockDetail)
     vi.mocked(fetchLatestCommitSha).mockResolvedValue('abc123')
+    vi.mocked(parseYouTubeVideoUrl).mockImplementation((input: string) =>
+      input.includes('watch?v=') ? { videoId: 'dQw4w9WgXcQ' } : null,
+    )
+    vi.mocked(fetchYouTubeVideo).mockResolvedValue(mockYoutubeCard)
   })
 
   it('uses system dark mode on first load when no saved theme', () => {
@@ -126,14 +168,72 @@ describe('App', () => {
     expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
   })
 
-  it('switches to youtube placeholder and hides github board', () => {
+  it('switches to youtube board and hides github board', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
 
-    expect(screen.getByText('유튜브 기능은 준비중입니다.')).toBeInTheDocument()
+    expect(screen.getByLabelText('YouTube 영상 URL')).toBeInTheDocument()
+    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
     expect(window.localStorage.getItem(TOP_SECTION_STORAGE_KEY)).toBe('youtube')
+  })
+
+  it('adds youtube card and filters within youtube tab', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
+    fireEvent.change(screen.getByLabelText('YouTube 영상 URL'), {
+      target: { value: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '추가' }))
+
+    await screen.findByText('Never Gonna Give You Up')
+    expect(screen.getByText('Rick Astley')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('등록 카드 검색'), { target: { value: 'rick' } })
+    expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
+    expect(screen.getByText('Never Gonna Give You Up')).toBeInTheDocument()
+  })
+
+  it('does not immediately degrade to local-only mode on first transient youtube remote save failure', async () => {
+    vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
+    vi.mocked(saveYoutubeDashboardToRemote)
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(undefined)
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/원격 저장 연결이 불안정합니다\. 자동 재시도 중입니다\./)).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('로컬 전환')).not.toBeInTheDocument()
+    expect(screen.queryByText(/로컬 저장으로 전환했습니다\./)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정' }))
+    fireEvent.change(screen.getByLabelText('새 카테고리 이름'), { target: { value: '복구확인' } })
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 생성' }))
+
+    await waitFor(() =>
+      expect(screen.queryByText(/원격 저장 연결이 불안정합니다\. 자동 재시도 중입니다\./)).not.toBeInTheDocument(),
+    )
+    expect(screen.queryByText('로컬 전환')).not.toBeInTheDocument()
+    expect(screen.queryByText(/로컬 저장으로 전환했습니다\./)).not.toBeInTheDocument()
+  })
+
+  it('does not overwrite remote github snapshot when initial remote load fails', async () => {
+    vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
+    vi.mocked(loadGithubDashboardFromRemote).mockRejectedValue(new TypeError('Failed to fetch'))
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(loadGithubDashboardFromRemote).toHaveBeenCalled()
+    })
+
+    expect(saveGithubDashboardToRemote).not.toHaveBeenCalled()
   })
 
   it('restores selected top section from storage', () => {

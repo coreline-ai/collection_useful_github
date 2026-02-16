@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "bash scripts/dev-all.sh",
+    "dev:status": "bash scripts/dev-status.sh",
     "server:dev": "npm --prefix server run dev",
     "server:start": "npm --prefix server start",
     "server:migrate": "npm --prefix server run migrate",

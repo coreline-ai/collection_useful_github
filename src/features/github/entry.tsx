@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   isRemoteSnapshotEnabled,
   loadGithubDashboardFromRemote,
@@ -16,6 +16,9 @@ import {
   CARDS_PER_PAGE,
   CATEGORY_NAME_MAX_LENGTH,
   DEFAULT_MAIN_CATEGORY_ID,
+  REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK,
+  REMOTE_SYNC_RECOVERED_BADGE_MS,
+  REMOTE_SYNC_RECOVERY_INTERVAL_MS,
 } from '@constants'
 import { removeRepoDetailCache } from '@storage/detailCache'
 import {
@@ -24,13 +27,15 @@ import {
   saveNotes,
   saveSelectedCategoryId,
 } from '@shared/storage/localStorage'
-import type { Category, CategoryId, RepoNote, ThemeMode } from '@shared/types'
+import type { Category, CategoryId, RepoNote, SyncConnectionStatus, ThemeMode } from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { parseGitHubRepoUrl } from '@utils/parseGitHubRepoUrl'
+import { isRemoteSyncConnectionWarning, isTransientRemoteSyncError } from '@utils/remoteSync'
 
 type GithubFeatureEntryProps = {
   themeMode: ThemeMode
   onToggleTheme: () => void
+  onSyncStatusChange?: (payload: { status: SyncConnectionStatus; lastSuccessAt: string | null }) => void
 }
 
 const createNoteId = (): string => {
@@ -67,13 +72,17 @@ const hasDuplicateCategoryName = (
   })
 }
 
-export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEntryProps) => {
+export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChange }: GithubFeatureEntryProps) => {
   const remoteEnabled = isRemoteSnapshotEnabled()
   const [state, dispatch] = useReducer(dashboardReducer, undefined, initialState)
   const [loading, setLoading] = useState(false)
   const [hydrating, setHydrating] = useState(remoteEnabled)
   const [hasLoadedRemote, setHasLoadedRemote] = useState(!remoteEnabled)
+  const [hasRemoteBaseline, setHasRemoteBaseline] = useState(!remoteEnabled)
   const [remoteSyncDegraded, setRemoteSyncDegraded] = useState(false)
+  const transientRemoteSaveFailuresRef = useRef(0)
+  const [syncStatus, setSyncStatus] = useState<SyncConnectionStatus>('healthy')
+  const [lastSyncSuccessAt, setLastSyncSuccessAt] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
@@ -132,14 +141,37 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
       return
     }
 
+    if (syncStatus !== 'recovered') {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSyncStatus('healthy')
+    }, REMOTE_SYNC_RECOVERED_BADGE_MS)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [remoteEnabled, syncStatus])
+
+  useEffect(() => {
+    if (!remoteEnabled) {
+      return
+    }
+
     let cancelled = false
 
     const hydrateFromRemote = async () => {
       setHydrating(true)
       setErrorMessage(null)
+      setSyncStatus('healthy')
 
       try {
         const remoteDashboard = await loadGithubDashboardFromRemote()
+        if (!cancelled) {
+          setHasRemoteBaseline(true)
+          setRemoteSyncDegraded(false)
+        }
 
         if (!cancelled && remoteDashboard) {
           dispatch({
@@ -151,10 +183,13 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
               selectedCategoryId: remoteDashboard.selectedCategoryId,
             },
           })
+          setLastSyncSuccessAt(new Date().toISOString())
         }
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(error instanceof Error ? error.message : '원격 대시보드 로딩에 실패했습니다.')
+          setRemoteSyncDegraded(true)
+          setSyncStatus('local')
         }
       } finally {
         if (!cancelled) {
@@ -172,7 +207,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
   }, [remoteEnabled])
 
   useEffect(() => {
-    if (remoteEnabled && !remoteSyncDegraded) {
+    if (remoteEnabled && !remoteSyncDegraded && hasRemoteBaseline) {
       if (!hasLoadedRemote) {
         return
       }
@@ -184,18 +219,53 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
         selectedCategoryId: state.selectedCategoryId,
       }
 
-      void saveGithubDashboardToRemote(payload).catch((error) => {
-        saveCards(state.cards)
-        saveNotes(state.notesByRepo)
-        saveCategories(state.categories)
-        saveSelectedCategoryId(state.selectedCategoryId)
-        setRemoteSyncDegraded(true)
-        setErrorMessage(
-          error instanceof Error
-            ? `${error.message} 로컬 저장으로 전환했습니다.`
-            : '원격 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.',
-        )
-      })
+      void saveGithubDashboardToRemote(payload)
+        .then(() => {
+          if (transientRemoteSaveFailuresRef.current > 0) {
+            transientRemoteSaveFailuresRef.current = 0
+            setSyncStatus('recovered')
+            setLastSyncSuccessAt(new Date().toISOString())
+            setErrorMessage((previous) =>
+              previous?.startsWith('원격 저장 연결이 불안정합니다.') ? null : previous,
+            )
+            return
+          }
+
+          if (!remoteSyncDegraded) {
+            setSyncStatus('healthy')
+            setLastSyncSuccessAt(new Date().toISOString())
+          }
+        })
+        .catch((error) => {
+          saveCards(state.cards)
+          saveNotes(state.notesByRepo)
+          saveCategories(state.categories)
+          saveSelectedCategoryId(state.selectedCategoryId)
+
+          const transientError = isTransientRemoteSyncError(error)
+
+          if (transientError) {
+            transientRemoteSaveFailuresRef.current += 1
+            if (transientRemoteSaveFailuresRef.current < REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK) {
+              setSyncStatus('retrying')
+              setErrorMessage(
+                `원격 저장 연결이 불안정합니다. 자동 재시도 중입니다. (${transientRemoteSaveFailuresRef.current}/${REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK})`,
+              )
+              return
+            }
+          }
+
+          transientRemoteSaveFailuresRef.current = 0
+          setRemoteSyncDegraded(true)
+          setSyncStatus('local')
+          setErrorMessage(
+            transientError
+              ? '원격 저장 연결이 계속 실패해 로컬 저장으로 전환했습니다. 서버 실행/네트워크/CORS 설정을 확인해 주세요.'
+              : error instanceof Error
+                ? `${error.message} 로컬 저장으로 전환했습니다.`
+                : '원격 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.',
+          )
+        })
       return
     }
 
@@ -205,6 +275,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
     saveSelectedCategoryId(state.selectedCategoryId)
   }, [
     hasLoadedRemote,
+    hasRemoteBaseline,
     remoteEnabled,
     remoteSyncDegraded,
     state.cards,
@@ -212,6 +283,93 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
     state.notesByRepo,
     state.selectedCategoryId,
   ])
+
+  useEffect(() => {
+    if (!remoteEnabled || !remoteSyncDegraded || !hasLoadedRemote) {
+      return
+    }
+
+    let cancelled = false
+    let inFlight = false
+
+    const tryRecover = async () => {
+      if (cancelled || inFlight) {
+        return
+      }
+
+      inFlight = true
+
+      try {
+        if (!hasRemoteBaseline) {
+          const remoteDashboard = await loadGithubDashboardFromRemote()
+          if (cancelled) {
+            return
+          }
+
+          if (remoteDashboard) {
+            dispatch({
+              type: 'hydrateDashboard',
+              payload: {
+                cards: remoteDashboard.cards,
+                notesByRepo: remoteDashboard.notesByRepo,
+                categories: remoteDashboard.categories,
+                selectedCategoryId: remoteDashboard.selectedCategoryId,
+              },
+            })
+          }
+
+          setHasRemoteBaseline(true)
+          setRemoteSyncDegraded(false)
+          setSyncStatus('recovered')
+          setLastSyncSuccessAt(new Date().toISOString())
+          setErrorMessage((previous) => (isRemoteSyncConnectionWarning(previous) ? null : previous))
+          return
+        }
+
+        await saveGithubDashboardToRemote({
+          cards: state.cards,
+          notesByRepo: state.notesByRepo,
+          categories: state.categories,
+          selectedCategoryId: state.selectedCategoryId,
+        })
+
+        if (!cancelled) {
+          transientRemoteSaveFailuresRef.current = 0
+          setRemoteSyncDegraded(false)
+          setSyncStatus('recovered')
+          setLastSyncSuccessAt(new Date().toISOString())
+          setErrorMessage((previous) => (isRemoteSyncConnectionWarning(previous) ? null : previous))
+        }
+      } catch {
+        // keep local fallback until remote read/write succeeds
+      } finally {
+        inFlight = false
+      }
+    }
+
+    void tryRecover()
+    const intervalId = window.setInterval(() => {
+      void tryRecover()
+    }, REMOTE_SYNC_RECOVERY_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [
+    hasLoadedRemote,
+    hasRemoteBaseline,
+    remoteEnabled,
+    remoteSyncDegraded,
+    state.cards,
+    state.categories,
+    state.notesByRepo,
+    state.selectedCategoryId,
+  ])
+
+  useEffect(() => {
+    onSyncStatusChange?.({ status: syncStatus, lastSuccessAt: lastSyncSuccessAt })
+  }, [lastSyncSuccessAt, onSyncStatusChange, syncStatus])
 
   useEffect(() => {
     const maxPage = pageCount(visibleCards.length, CARDS_PER_PAGE)
@@ -418,7 +576,6 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
             </button>
           </div>
         </div>
-
         {categoryMessage && !isCategoryModalOpen ? <p className="category-message">{categoryMessage}</p> : null}
       </section>
 

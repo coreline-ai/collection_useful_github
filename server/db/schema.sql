@@ -65,12 +65,30 @@ CREATE INDEX IF NOT EXISTS idx_unified_items_summary_lower_trgm
 CREATE INDEX IF NOT EXISTS idx_unified_items_description_lower_trgm
   ON unified_items USING GIN (lower(description) gin_trgm_ops);
 
+CREATE INDEX IF NOT EXISTS idx_unified_items_author_lower_trgm
+  ON unified_items USING GIN (lower(author) gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_native_id_lower_trgm
+  ON unified_items USING GIN (lower(native_id) gin_trgm_ops);
+
 CREATE INDEX IF NOT EXISTS idx_unified_items_search_vector
   ON unified_items
   USING GIN (
     (
       setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(title, '')))), 'A') ||
       setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(summary, '')))), 'B') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(description, '')))), 'C')
+    )
+  );
+
+CREATE INDEX IF NOT EXISTS idx_unified_items_search_vector_v2
+  ON unified_items
+  USING GIN (
+    (
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(title, '')))), 'A') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(native_id, '')))), 'A') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(summary, '')))), 'B') ||
+      setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(author, '')))), 'B') ||
       setweight(to_tsvector('simple'::regconfig, immutable_unaccent(lower(COALESCE(description, '')))), 'C')
     )
   );

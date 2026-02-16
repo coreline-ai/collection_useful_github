@@ -45,17 +45,27 @@ GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `git
 - Activity는 저장소 이벤트 기반 타임라인
 - 메모 입력 후 즉시 누적, 영속 저장
 
-### 4) 수동 번역
+### 4) YouTube 보드
+- 영상 URL 입력으로 카드 생성 (`watch`, `youtu.be`, `shorts`)
+- GitHub와 동일한 보드 플로우:
+  - 입력 2분할(영상 추가 + 등록 카드 검색)
+  - 카테고리/창고, 이동/삭제, 페이지네이션
+- 카드 레이아웃:
+  - 썸네일, 제목, 채널명, 조회수, 게시일, YouTube 링크
+- 상세 모달 없이 카드에서 링크로 바로 이동
+- YouTube 보드는 원격 실패 시 로컬 저장소로 degrade
+
+### 5) 수동 번역
 - 자동 번역 없음
 - 개요/README/Activity 각각 수동 번역 버튼 제공
 - GLM 우선, OpenAI fallback
 
-### 5) 통합검색 + 백업
+### 6) 통합검색 + 백업
 - Provider/Type 필터 포함 전역 검색
 - 검색 결과 스코어/매칭 신호(`exact/prefix/fts/trgm`) 지원
 - 백업 내보내기(JSON) / 백업 복원(JSON)
 
-### 6) 테마
+### 7) 테마
 - `light | dark` 토글
 - 저장값 없을 때 OS 다크모드 1회 감지
 - 다크 테마는 순수 블랙 기반 팔레트
@@ -77,7 +87,7 @@ GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `git
 ### Data Layer
 - PostgreSQL 단일 스키마(`unified_items`, `unified_notes`, `unified_meta`)
 - 로컬 마이그레이션으로 기존 데이터를 unified 스키마로 이관
-- GitHub 보드는 원격 실패 시 로컬 저장소로 degrade
+- GitHub/YouTube 보드는 원격 실패 시 각 탭별 로컬 저장소로 degrade
 
 ## 통합검색 방식
 
@@ -159,16 +169,25 @@ docker-compose up -d
 cd ..
 ```
 
-### 4) 스키마 반영 + 서버 실행
+### 4) 스키마 반영
 
 ```bash
 npm run server:migrate
-npm run server:start
 ```
 
-### 5) 프론트 실행
+### 5) 개발 서버 실행 (권장: 통합 실행)
 
 ```bash
+npm run dev:all
+```
+
+`dev:all`은 API(4000)와 프론트(5173)를 한 프로세스 트리로 함께 실행해
+"프론트만 죽고 포트가 닫히는" 상황을 줄이도록 구성되어 있습니다.
+
+개별 실행이 필요하면 아래를 사용하세요.
+
+```bash
+npm run server:dev
 npm run dev
 ```
 
@@ -207,6 +226,8 @@ npm run dev
 | `PGDATABASE` | 선택 | `useful_git_info` | DB 이름 |
 | `PGSSL` | 선택 | `false` | SSL 사용 여부 |
 | `CORS_ORIGIN` | 선택 | `http://localhost:5173` | CORS 허용 출처 |
+| `YOUTUBE_API_KEY` | YouTube 사용 시 필수 | - | YouTube Data API v3 키 |
+| `YOUTUBE_API_TIMEOUT_SECONDS` | 선택 | `12` | YouTube API 타임아웃(초) |
 
 ## 데이터 모델
 
@@ -252,6 +273,9 @@ type UnifiedItem = {
 - `github_cards_v1` (fallback/legacy)
 - `github_notes_v1` (fallback/legacy)
 - `github_repo_detail_cache_v1`
+- `youtube_cards_v1` (fallback/legacy)
+- `youtube_categories_v1` (fallback/legacy)
+- `youtube_selected_category_v1` (fallback/legacy)
 
 ## 프로젝트 구조
 
@@ -300,6 +324,9 @@ type UnifiedItem = {
 - `GET /api/health/deep`
 - `GET /api/github/dashboard`
 - `PUT /api/github/dashboard`
+- `GET /api/youtube/videos/:videoId`
+- `GET /api/youtube/dashboard`
+- `PUT /api/youtube/dashboard`
 - `PUT /api/providers/:provider/snapshot`
 - `GET /api/providers/:provider/items`
 - `GET /api/items/:id`
@@ -311,6 +338,8 @@ type UnifiedItem = {
 
 ```bash
 npm run dev                  # frontend dev (5173)
+npm run dev:all              # server+frontend (권장)
+npm run dev:status           # 4000/5173 상태 점검
 npm run server:dev           # backend watch
 npm run server:start         # backend start
 npm run server:migrate       # schema apply

@@ -55,6 +55,32 @@ const canUseStorage = (): boolean => typeof window !== 'undefined' && Boolean(wi
 
 const normalizeQuery = (value: string): string => value.trim().toLocaleLowerCase('ko-KR')
 
+const PROVIDER_DEFAULT_TYPE: Record<ProviderType, UnifiedItemType> = {
+  github: 'repository',
+  youtube: 'video',
+  bookmark: 'bookmark',
+}
+
+const PROVIDER_LABEL: Record<ProviderType, string> = {
+  github: 'GitHub',
+  youtube: 'YouTube',
+  bookmark: 'Bookmark',
+}
+
+const TYPE_LABEL: Record<UnifiedItemType, string> = {
+  repository: 'Repository',
+  video: 'Video',
+  bookmark: 'Bookmark',
+}
+
+const isProviderTypeCompatible = (provider: SearchProviderFilter, type: SearchTypeFilter): boolean => {
+  if (provider === 'all' || type === 'all') {
+    return true
+  }
+
+  return PROVIDER_DEFAULT_TYPE[provider] === type
+}
+
 const toCacheKey = (params: { q: string; provider: SearchProviderFilter; type: SearchTypeFilter }): string => {
   return [
     normalizeQuery(params.q),
@@ -152,6 +178,22 @@ export const useUnifiedSearchState = (): UnifiedSearchState => {
   const importInputRef = useRef<HTMLInputElement | null>(null)
   const searchCacheRef = useRef<Map<string, SearchCacheEntry>>(new Map())
 
+  const updateSearchProvider = (value: SearchProviderFilter) => {
+    setSearchProvider(value)
+
+    if (value !== 'all' && searchType !== 'all' && !isProviderTypeCompatible(value, searchType)) {
+      const nextType = PROVIDER_DEFAULT_TYPE[value]
+      setSearchType(nextType)
+      setSearchMessage(
+        `${PROVIDER_LABEL[value]} provider에서는 ${TYPE_LABEL[nextType]} 타입으로 자동 변경했습니다.`,
+      )
+    }
+  }
+
+  const updateSearchType = (value: SearchTypeFilter) => {
+    setSearchType(value)
+  }
+
   const readCache = (key: string): UnifiedItem[] | null => {
     const entry = searchCacheRef.current.get(key)
 
@@ -205,10 +247,24 @@ export const useUnifiedSearchState = (): UnifiedSearchState => {
       return
     }
 
+    const resolvedType =
+      provider !== 'all' && type !== 'all' && !isProviderTypeCompatible(provider, type)
+        ? PROVIDER_DEFAULT_TYPE[provider]
+        : type
+
+    if (resolvedType !== type) {
+      setSearchType(resolvedType)
+      if (provider !== 'all' && resolvedType !== 'all') {
+        setSearchMessage(
+          `${PROVIDER_LABEL[provider]} provider에서는 ${TYPE_LABEL[resolvedType]} 타입으로 자동 변경했습니다.`,
+        )
+      }
+    }
+
     const cacheKey = toCacheKey({
       q: trimmedQuery,
       provider,
-      type,
+      type: resolvedType,
     })
     const cachedItems = readCache(cacheKey)
 
@@ -225,7 +281,7 @@ export const useUnifiedSearchState = (): UnifiedSearchState => {
       const items = await searchUnifiedItems({
         query: trimmedQuery,
         provider,
-        type,
+        type: resolvedType,
         limit: 40,
         mode: 'relevance',
         fuzzy: true,
@@ -234,12 +290,18 @@ export const useUnifiedSearchState = (): UnifiedSearchState => {
       })
       writeCache(cacheKey, items)
       setSearchResults(items)
-      setSearchMessage(items.length > 0 ? null : '검색 결과가 없습니다.')
+      setSearchMessage(
+        items.length > 0
+          ? null
+          : provider === 'youtube'
+            ? '검색 결과가 없습니다. YouTube는 제목/채널명/설명/영상 ID로 검색해 보세요.'
+            : '검색 결과가 없습니다.',
+      )
 
       const nextRecent = upsertRecentQuery(recentQueries, {
         q: trimmedQuery,
         provider,
-        type,
+        type: resolvedType,
         searchedAt: new Date().toISOString(),
       })
       setRecentQueries(nextRecent)
@@ -341,8 +403,8 @@ export const useUnifiedSearchState = (): UnifiedSearchState => {
     backupMessage,
     importInputRef,
     setSearchInput,
-    setSearchProvider,
-    setSearchType,
+    setSearchProvider: updateSearchProvider,
+    setSearchType: updateSearchType,
     handleSearch,
     handleSelectRecentQuery,
     handleClearRecentQueries,

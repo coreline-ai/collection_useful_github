@@ -1,42 +1,49 @@
-import type { UnifiedItem } from '@shared/types'
+import type { UnifiedItem, YouTubeVideoCard } from '@shared/types'
 
-export type YoutubeDraftItem = {
-  nativeId: string
-  title: string
-  summary: string
-  description: string
-  url: string
-  tags?: string[]
-  author?: string | null
-  views?: number
-  likes?: number
-  createdAt?: string
-  updatedAt?: string
+const buildSummary = (description: string): string => {
+  const normalized = description.replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return '영상 설명이 없습니다.'
+  }
+
+  if (normalized.length <= 180) {
+    return normalized
+  }
+
+  return `${normalized.slice(0, 177)}...`
 }
 
-export const toYoutubeUnifiedItem = (item: YoutubeDraftItem): UnifiedItem => {
-  const now = new Date().toISOString()
+export const toYoutubeUnifiedItem = (card: YouTubeVideoCard, sortIndex: number): UnifiedItem => {
+  const normalizedVideoId = card.videoId || card.id
 
   return {
-    id: `youtube:${item.nativeId}`,
+    id: `youtube:${normalizedVideoId}`,
     provider: 'youtube',
     type: 'video',
-    nativeId: item.nativeId,
-    title: item.title,
-    summary: item.summary,
-    description: item.description,
-    url: item.url,
-    tags: item.tags ?? [],
-    author: item.author ?? null,
+    nativeId: normalizedVideoId,
+    title: card.title,
+    summary: buildSummary(card.description),
+    description: card.description,
+    url: card.videoUrl,
+    tags: [],
+    author: card.channelTitle,
     language: null,
     metrics: {
-      views: item.views,
-      likes: item.likes,
+      views: card.viewCount,
+      likes: card.likeCount ?? undefined,
     },
-    status: 'active',
-    createdAt: item.createdAt ?? now,
-    updatedAt: item.updatedAt ?? now,
-    savedAt: now,
-    raw: {},
+    status: card.categoryId === 'warehouse' ? 'archived' : 'active',
+    createdAt: card.publishedAt,
+    updatedAt: card.updatedAt,
+    savedAt: card.addedAt,
+    raw: {
+      categoryId: card.categoryId,
+      sortIndex,
+      card: {
+        ...card,
+        id: card.id || normalizedVideoId,
+        videoId: normalizedVideoId,
+      },
+    },
   }
 }

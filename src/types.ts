@@ -3,6 +3,7 @@ export type TopSection = 'search' | 'github' | 'youtube' | 'bookmark'
 export type ProviderType = 'github' | 'youtube' | 'bookmark'
 export type UnifiedItemType = 'repository' | 'video' | 'bookmark'
 export type UnifiedStatus = 'active' | 'archived'
+export type SyncConnectionStatus = 'healthy' | 'retrying' | 'local' | 'recovered'
 
 export type CategoryId = 'main' | 'warehouse' | string
 
@@ -71,6 +72,28 @@ export type RepoDetailCacheMap = Record<string, RepoDetailCacheEntry>
 export type GitHubDashboardSnapshot = {
   cards: GitHubRepoCard[]
   notesByRepo: NotesByRepo
+  categories: Category[]
+  selectedCategoryId: CategoryId
+}
+
+export type YouTubeVideoCard = {
+  id: string
+  categoryId: CategoryId
+  videoId: string
+  title: string
+  channelTitle: string
+  description: string
+  thumbnailUrl: string
+  videoUrl: string
+  publishedAt: string
+  viewCount: number
+  likeCount: number | null
+  addedAt: string
+  updatedAt: string
+}
+
+export type YouTubeDashboardSnapshot = {
+  cards: YouTubeVideoCard[]
   categories: Category[]
   selectedCategoryId: CategoryId
 }

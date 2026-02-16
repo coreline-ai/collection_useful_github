@@ -7,6 +7,9 @@ import {
   SELECTED_CATEGORY_STORAGE_KEY,
   THEME_STORAGE_KEY,
   TOP_SECTION_STORAGE_KEY,
+  YOUTUBE_CARDS_STORAGE_KEY,
+  YOUTUBE_CATEGORIES_STORAGE_KEY,
+  YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY,
 } from '../constants'
 import {
   loadCards,
@@ -15,12 +18,18 @@ import {
   loadSelectedCategoryId,
   loadThemeMode,
   loadTopSection,
+  loadYoutubeCards,
+  loadYoutubeCategories,
+  loadYoutubeSelectedCategoryId,
   saveCards,
   saveCategories,
   saveNotes,
   saveSelectedCategoryId,
   saveThemeMode,
   saveTopSection,
+  saveYoutubeCards,
+  saveYoutubeCategories,
+  saveYoutubeSelectedCategoryId,
 } from './localStorage'
 
 describe('localStorage theme mode', () => {
@@ -155,5 +164,80 @@ describe('localStorage dashboard data', () => {
     expect(loadCards()).toEqual([])
     expect(loadNotes()).toEqual({})
     expect(loadCategories()).toEqual([])
+  })
+})
+
+describe('localStorage youtube dashboard data', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('migrates youtube cards without categoryId/videoId to defaults on load', () => {
+    window.localStorage.setItem(
+      YOUTUBE_CARDS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: 'dQw4w9WgXcQ',
+          title: 'Video',
+          channelTitle: 'Channel',
+          description: '',
+          thumbnailUrl: 'https://img',
+          videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          publishedAt: '2026-01-01T00:00:00.000Z',
+          viewCount: 1,
+          likeCount: null,
+          addedAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ]),
+    )
+
+    const cards = loadYoutubeCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].categoryId).toBe(DEFAULT_MAIN_CATEGORY_ID)
+    expect(cards[0].videoId).toBe('dQw4w9WgXcQ')
+  })
+
+  it('saves and loads youtube cards/categories/selected category', () => {
+    saveYoutubeCards([
+      {
+        id: 'dQw4w9WgXcQ',
+        videoId: 'dQw4w9WgXcQ',
+        categoryId: 'main',
+        title: 'Video',
+        channelTitle: 'Channel',
+        description: '',
+        thumbnailUrl: 'https://img',
+        videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        viewCount: 1,
+        likeCount: null,
+        addedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ])
+    saveYoutubeCategories([
+      { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'music', name: '음악', isSystem: false, createdAt: '2026-01-01T00:00:00.000Z' },
+    ])
+    saveYoutubeSelectedCategoryId('music')
+
+    expect(loadYoutubeCards()).toHaveLength(1)
+    expect(loadYoutubeCategories()).toHaveLength(3)
+    expect(loadYoutubeSelectedCategoryId()).toBe('music')
+  })
+
+  it('returns null for empty youtube selected category id', () => {
+    window.localStorage.setItem(YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY, ' ')
+    expect(loadYoutubeSelectedCategoryId()).toBeNull()
+  })
+
+  it('returns fallback values for broken youtube payloads', () => {
+    window.localStorage.setItem(YOUTUBE_CARDS_STORAGE_KEY, '{broken')
+    window.localStorage.setItem(YOUTUBE_CATEGORIES_STORAGE_KEY, '{broken')
+
+    expect(loadYoutubeCards()).toEqual([])
+    expect(loadYoutubeCategories()).toEqual([])
   })
 })

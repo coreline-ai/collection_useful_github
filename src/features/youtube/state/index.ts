@@ -1,7 +1,2 @@
-export type YoutubeFeatureState = {
-  initializedAt: string
-}
-
-export const createYoutubeInitialState = (): YoutubeFeatureState => ({
-  initializedAt: new Date().toISOString(),
-})
+export { dashboardReducer, initialState } from './dashboardReducer'
+export type { YouTubeDashboardState } from './dashboardReducer'

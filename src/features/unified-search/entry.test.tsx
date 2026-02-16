@@ -79,6 +79,31 @@ describe('UnifiedSearchFeatureEntry', () => {
     expect(screen.getByText('검색 결과가 없습니다.')).toBeInTheDocument()
   })
 
+  it('auto-corrects incompatible provider/type combination for youtube search', async () => {
+    vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
+    vi.mocked(searchUnifiedItems).mockResolvedValue([])
+
+    render(<UnifiedSearchFeatureEntry />)
+
+    fireEvent.change(screen.getByLabelText('통합 검색어'), { target: { value: 'dante' } })
+    fireEvent.change(screen.getByLabelText('검색 provider'), { target: { value: 'youtube' } })
+    fireEvent.change(screen.getByLabelText('검색 타입'), { target: { value: 'repository' } })
+    fireEvent.click(screen.getByRole('button', { name: '검색' }))
+
+    await waitFor(() => {
+      expect(searchUnifiedItems).toHaveBeenCalledWith({
+        query: 'dante',
+        provider: 'youtube',
+        type: 'video',
+        limit: 40,
+        mode: 'relevance',
+        fuzzy: true,
+        prefix: true,
+        minScore: 0,
+      })
+    })
+  })
+
   it('uses memory cache for repeated same query', async () => {
     vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
     vi.mocked(searchUnifiedItems).mockResolvedValue([

@@ -9,6 +9,12 @@ dotenv.config()
 const PROVIDERS = new Set(['github', 'youtube', 'bookmark'])
 const TYPES = new Set(['repository', 'video', 'bookmark'])
 const DASHBOARD_META_KEY = 'github_dashboard_v1'
+const YOUTUBE_DASHBOARD_META_KEY = 'youtube_dashboard_v1'
+const youtubeApiKey = (process.env.YOUTUBE_API_KEY || '').trim()
+const youtubeTimeoutSeconds = Number(process.env.YOUTUBE_API_TIMEOUT_SECONDS || 12)
+const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeoutSeconds > 0
+  ? Math.floor(youtubeTimeoutSeconds * 1000)
+  : 12000
 
 const DEFAULT_CATEGORIES = [
   {
@@ -253,6 +259,21 @@ const normalizeDashboardPayload = (rawDashboard) => {
   }
 }
 
+const normalizeYoutubeDashboardPayload = (rawDashboard) => {
+  const dashboard = rawDashboard && typeof rawDashboard === 'object' ? rawDashboard : {}
+  const cards = Array.isArray(dashboard.cards) ? dashboard.cards : []
+  const categories = normalizeCategories(dashboard.categories)
+  const selectedCategoryId = categories.some((category) => category.id === dashboard.selectedCategoryId)
+    ? dashboard.selectedCategoryId
+    : 'main'
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
 const toGithubUnifiedItems = (cards) => {
   return cards.map((card, index) => {
     const normalizedCard = {
@@ -296,6 +317,60 @@ const toGithubUnifiedItems = (cards) => {
       },
       status: normalizedCard.categoryId === 'warehouse' ? 'archived' : 'active',
       createdAt: normalizedCard.createdAt,
+      updatedAt: normalizedCard.updatedAt,
+      savedAt: normalizedCard.addedAt,
+      raw: {
+        card: normalizedCard,
+        categoryId: normalizedCard.categoryId,
+        sortIndex: index,
+      },
+    })
+  })
+}
+
+const toYoutubeUnifiedItems = (cards) => {
+  return cards.map((card, index) => {
+    const videoId = String(card.videoId || card.id || '')
+    const normalizedCard = {
+      id: String(card.id || videoId),
+      videoId,
+      categoryId: String(card.categoryId || 'main'),
+      title: String(card.title || ''),
+      channelTitle: String(card.channelTitle || ''),
+      description: String(card.description || ''),
+      thumbnailUrl: String(card.thumbnailUrl || ''),
+      videoUrl: String(card.videoUrl || `https://www.youtube.com/watch?v=${videoId}`),
+      publishedAt: toIso(card.publishedAt || new Date().toISOString()),
+      viewCount: Number(card.viewCount || 0),
+      likeCount:
+        typeof card.likeCount === 'number' && Number.isFinite(card.likeCount)
+          ? Number(card.likeCount)
+          : null,
+      addedAt: toIso(card.addedAt || new Date().toISOString()),
+      updatedAt: toIso(card.updatedAt || card.publishedAt || new Date().toISOString()),
+    }
+
+    const summary = normalizedCard.description
+      ? normalizedCard.description.replace(/\s+/g, ' ').trim().slice(0, 180)
+      : '영상 설명이 없습니다.'
+
+    return normalizeItem('youtube', {
+      id: `youtube:${videoId}`,
+      type: 'video',
+      nativeId: videoId,
+      title: normalizedCard.title,
+      summary: summary.length < normalizedCard.description.length ? `${summary.slice(0, 177)}...` : summary,
+      description: normalizedCard.description,
+      url: normalizedCard.videoUrl,
+      tags: [],
+      author: normalizedCard.channelTitle,
+      language: null,
+      metrics: {
+        views: normalizedCard.viewCount,
+        likes: normalizedCard.likeCount,
+      },
+      status: normalizedCard.categoryId === 'warehouse' ? 'archived' : 'active',
+      createdAt: normalizedCard.publishedAt,
       updatedAt: normalizedCard.updatedAt,
       savedAt: normalizedCard.addedAt,
       raw: {
@@ -361,6 +436,53 @@ const mapItemRowToGithubCard = (row) => {
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     addedAt: toIso(row.savedAt),
+  }
+}
+
+const mapItemRowToYoutubeCard = (row) => {
+  const raw = row.raw && typeof row.raw === 'object' ? row.raw : {}
+
+  if (raw.card && typeof raw.card === 'object') {
+    const card = raw.card
+
+    return {
+      id: String(card.id || row.nativeId),
+      videoId: String(card.videoId || row.nativeId),
+      categoryId: String(card.categoryId || raw.categoryId || 'main'),
+      title: String(card.title || row.title || ''),
+      channelTitle: String(card.channelTitle || row.author || ''),
+      description: String(card.description || row.description || ''),
+      thumbnailUrl: String(card.thumbnailUrl || ''),
+      videoUrl: String(card.videoUrl || row.url || ''),
+      publishedAt: toIso(card.publishedAt || row.createdAt),
+      viewCount: Number(card.viewCount || row.metrics?.views || 0),
+      likeCount:
+        typeof card.likeCount === 'number'
+          ? Number(card.likeCount)
+          : typeof row.metrics?.likes === 'number'
+            ? Number(row.metrics.likes)
+            : null,
+      addedAt: toIso(card.addedAt || row.savedAt),
+      updatedAt: toIso(card.updatedAt || row.updatedAt),
+    }
+  }
+
+  const videoId = String(row.nativeId || '')
+
+  return {
+    id: videoId,
+    videoId,
+    categoryId: String(raw.categoryId || 'main'),
+    title: String(row.title || ''),
+    channelTitle: String(row.author || ''),
+    description: String(row.description || ''),
+    thumbnailUrl: '',
+    videoUrl: String(row.url || `https://www.youtube.com/watch?v=${videoId}`),
+    publishedAt: toIso(row.createdAt),
+    viewCount: Number(row.metrics?.views || 0),
+    likeCount: typeof row.metrics?.likes === 'number' ? Number(row.metrics.likes) : null,
+    addedAt: toIso(row.savedAt),
+    updatedAt: toIso(row.updatedAt),
   }
 }
 
@@ -542,6 +664,167 @@ const persistGithubDashboard = async (dashboard) => {
   }
 }
 
+const loadYoutubeDashboard = async () => {
+  const [itemsResult, metaResult] = await Promise.all([
+    query(
+      `
+        SELECT
+          id,
+          provider,
+          type,
+          native_id AS "nativeId",
+          title,
+          summary,
+          description,
+          url,
+          tags,
+          author,
+          language,
+          metrics,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          saved_at AS "savedAt",
+          raw
+        FROM unified_items
+        WHERE provider = 'youtube'
+        ORDER BY COALESCE((raw->>'sortIndex')::int, 2147483647), saved_at DESC
+      `,
+    ),
+    query(
+      `
+        SELECT value
+        FROM unified_meta
+        WHERE key = $1
+      `,
+      [YOUTUBE_DASHBOARD_META_KEY],
+    ),
+  ])
+
+  const cards = itemsResult.rows.map(mapItemRowToYoutubeCard)
+  const metaValue = metaResult.rowCount ? metaResult.rows[0].value : null
+  const categories = normalizeCategories(metaValue?.categories)
+  const selectedCategoryId = categories.some((category) => category.id === metaValue?.selectedCategoryId)
+    ? metaValue.selectedCategoryId
+    : 'main'
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
+const persistYoutubeDashboard = async (dashboard) => {
+  const normalized = normalizeYoutubeDashboardPayload(dashboard)
+  const items = toYoutubeUnifiedItems(normalized.cards)
+
+  const client = await getClient()
+
+  try {
+    await client.query('BEGIN')
+
+    await client.query('DELETE FROM unified_items WHERE provider = $1', ['youtube'])
+
+    const insertItemSql = `
+      INSERT INTO unified_items (
+        id, provider, type, native_id, title, summary, description, url, tags, author, language,
+        metrics, status, created_at, updated_at, saved_at, raw
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12::jsonb, $13, $14::timestamptz, $15::timestamptz, $16::timestamptz, $17::jsonb
+      )
+    `
+
+    for (const item of items) {
+      await client.query(insertItemSql, [
+        item.id,
+        item.provider,
+        item.type,
+        item.nativeId,
+        item.title,
+        item.summary,
+        item.description,
+        item.url,
+        item.tags,
+        item.author,
+        item.language,
+        JSON.stringify(item.metrics),
+        item.status,
+        item.createdAt,
+        item.updatedAt,
+        item.savedAt,
+        JSON.stringify(item.raw),
+      ])
+    }
+
+    await client.query(
+      `
+        INSERT INTO unified_meta (key, value, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+      `,
+      [
+        YOUTUBE_DASHBOARD_META_KEY,
+        JSON.stringify({
+          categories: normalized.categories,
+          selectedCategoryId: normalized.selectedCategoryId,
+          updatedAt: new Date().toISOString(),
+        }),
+      ],
+    )
+
+    await client.query(
+      `
+        INSERT INTO unified_meta (key, value, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+      `,
+      ['snapshot:youtube', JSON.stringify({ items: items.length, notes: 0 })],
+    )
+
+    await client.query('COMMIT')
+
+    return {
+      items: items.length,
+      categories: normalized.categories.length,
+    }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+const fetchWithTimeout = async (url, timeoutMs) => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, { signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const parseYoutubeErrorMessage = (payload, fallback) => {
+  const rawError = payload?.error
+  if (!rawError || typeof rawError !== 'object') {
+    return fallback
+  }
+
+  const directMessage = typeof rawError.message === 'string' ? rawError.message : ''
+  if (directMessage) {
+    return directMessage
+  }
+
+  const firstError = Array.isArray(rawError.errors) ? rawError.errors[0] : null
+  return typeof firstError?.message === 'string' && firstError.message ? firstError.message : fallback
+}
+
 app.get('/api/health', async (_req, res, next) => {
   try {
     await query('SELECT 1')
@@ -586,6 +869,95 @@ app.get('/api/health/deep', async (_req, res, next) => {
   }
 })
 
+app.get('/api/youtube/videos/:videoId', async (req, res, next) => {
+  try {
+    const { videoId } = req.params
+
+    if (!/^[a-zA-Z0-9_-]{6,20}$/.test(String(videoId || ''))) {
+      const error = new Error('유효한 YouTube 영상 ID가 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    if (!youtubeApiKey) {
+      const error = new Error('YOUTUBE_API_KEY가 설정되지 않았습니다.')
+      error.status = 503
+      throw error
+    }
+
+    const apiUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
+    apiUrl.searchParams.set('part', 'snippet,statistics')
+    apiUrl.searchParams.set('id', videoId)
+    apiUrl.searchParams.set('key', youtubeApiKey)
+
+    let response
+    try {
+      response = await fetchWithTimeout(apiUrl.toString(), youtubeTimeoutMs)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        const timeoutError = new Error('YouTube API 요청 시간이 초과되었습니다.')
+        timeoutError.status = 408
+        throw timeoutError
+      }
+      throw error
+    }
+
+    const payload = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      const apiMessage = parseYoutubeErrorMessage(payload, 'YouTube API 요청에 실패했습니다.')
+      const lowerMessage = apiMessage.toLowerCase()
+
+      const failure = new Error(
+        lowerMessage.includes('quota')
+          ? 'YouTube API 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.'
+          : `YouTube API 오류: ${apiMessage}`,
+      )
+      failure.status = response.status === 403 && lowerMessage.includes('quota') ? 403 : response.status
+      throw failure
+    }
+
+    const item = Array.isArray(payload.items) ? payload.items[0] : null
+    if (!item) {
+      const notFound = new Error('영상을 찾을 수 없습니다. URL을 확인해 주세요.')
+      notFound.status = 404
+      throw notFound
+    }
+
+    const snippet = item.snippet || {}
+    const statistics = item.statistics || {}
+    const thumbnails = snippet.thumbnails || {}
+    const thumbnailUrl =
+      thumbnails.maxres?.url ||
+      thumbnails.standard?.url ||
+      thumbnails.high?.url ||
+      thumbnails.medium?.url ||
+      thumbnails.default?.url ||
+      ''
+
+    res.json({
+      ok: true,
+      video: {
+        videoId: String(item.id || videoId),
+        title: String(snippet.title || ''),
+        channelTitle: String(snippet.channelTitle || ''),
+        description: String(snippet.description || ''),
+        thumbnailUrl: String(thumbnailUrl),
+        publishedAt: toIso(snippet.publishedAt || new Date().toISOString()),
+        viewCount: Number(statistics.viewCount || 0),
+        likeCount:
+          typeof statistics.likeCount === 'string' || typeof statistics.likeCount === 'number'
+            ? Number(statistics.likeCount)
+            : null,
+        url: `https://www.youtube.com/watch?v=${String(item.id || videoId)}`,
+        updatedAt: toIso(snippet.publishedAt || new Date().toISOString()),
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/github/dashboard', async (_req, res, next) => {
   try {
     const dashboard = await loadGithubDashboard()
@@ -599,6 +971,25 @@ app.put('/api/github/dashboard', async (req, res, next) => {
   try {
     const dashboard = normalizeDashboardPayload(req.body?.dashboard)
     const result = await persistGithubDashboard(dashboard)
+    res.json({ ok: true, ...result })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/youtube/dashboard', async (_req, res, next) => {
+  try {
+    const dashboard = await loadYoutubeDashboard()
+    res.json({ ok: true, dashboard })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.put('/api/youtube/dashboard', async (req, res, next) => {
+  try {
+    const dashboard = normalizeYoutubeDashboardPayload(req.body?.dashboard)
+    const result = await persistYoutubeDashboard(dashboard)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)
@@ -853,6 +1244,8 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
               title ILIKE '%' || $3 || '%'
               OR summary ILIKE '%' || $3 || '%'
               OR description ILIKE '%' || $3 || '%'
+              OR author ILIKE '%' || $3 || '%'
+              OR native_id ILIKE '%' || $3 || '%'
               OR array_to_string(tags, ' ') ILIKE '%' || $3 || '%'
             )
           ORDER BY updated_at DESC
@@ -870,6 +1263,7 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
         WITH search_params AS (
           SELECT
             immutable_unaccent(lower($3::text)) AS normalized_q,
+            btrim(regexp_replace(immutable_unaccent(lower($3::text)), '[^[:alnum:][:space:]_]+', ' ', 'g')) AS normalized_q_prefix,
             CASE
               WHEN btrim(regexp_replace(immutable_unaccent(lower($3::text)), '[^[:alnum:][:space:]_]+', ' ', 'g')) = ''
                 THEN NULL::tsquery
@@ -907,7 +1301,14 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
             immutable_unaccent(lower(COALESCE(ui.title, ''))) AS normalized_title,
             immutable_unaccent(lower(COALESCE(ui.summary, ''))) AS normalized_summary,
             immutable_unaccent(lower(COALESCE(ui.description, ''))) AS normalized_description,
+            immutable_unaccent(lower(COALESCE(ui.author, ''))) AS normalized_author,
+            immutable_unaccent(lower(COALESCE(ui.native_id, ''))) AS normalized_native_id,
+            immutable_unaccent(lower(COALESCE(array_to_string(ui.tags, ' '), ''))) AS normalized_tags,
+            btrim(regexp_replace(immutable_unaccent(lower(COALESCE(ui.title, ''))), '[^[:alnum:][:space:]_]+', ' ', 'g')) AS normalized_title_prefix,
+            btrim(regexp_replace(immutable_unaccent(lower(COALESCE(ui.author, ''))), '[^[:alnum:][:space:]_]+', ' ', 'g')) AS normalized_author_prefix,
+            btrim(regexp_replace(immutable_unaccent(lower(COALESCE(ui.native_id, ''))), '[^[:alnum:][:space:]_]+', ' ', 'g')) AS normalized_native_id_prefix,
             sp.normalized_q,
+            sp.normalized_q_prefix,
             sp.fts_query,
             sp.typo_threshold
           FROM unified_items ui
@@ -920,21 +1321,38 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
             base.*,
             (
               setweight(to_tsvector('simple'::regconfig, base.normalized_title), 'A') ||
+              setweight(to_tsvector('simple'::regconfig, base.normalized_native_id), 'A') ||
               setweight(to_tsvector('simple'::regconfig, base.normalized_summary), 'B') ||
-              setweight(to_tsvector('simple'::regconfig, base.normalized_description), 'C')
+              setweight(to_tsvector('simple'::regconfig, base.normalized_author), 'B') ||
+              setweight(to_tsvector('simple'::regconfig, base.normalized_description), 'C') ||
+              setweight(to_tsvector('simple'::regconfig, base.normalized_tags), 'C')
             ) AS search_vector,
             (
               base.normalized_title = base.normalized_q
-              OR lower(COALESCE(base."nativeId", '')) = base.normalized_q
+              OR base.normalized_native_id = base.normalized_q
+              OR base.normalized_author = base.normalized_q
             ) AS exact_hit,
-            (base.normalized_title LIKE base.normalized_q || '%') AS prefix_hit,
+            (
+              base.normalized_q_prefix <> ''
+              AND (
+                base.normalized_title_prefix LIKE base.normalized_q_prefix || '%'
+                OR base.normalized_author_prefix LIKE base.normalized_q_prefix || '%'
+                OR base.normalized_native_id_prefix LIKE base.normalized_q_prefix || '%'
+              )
+            ) AS prefix_hit,
             GREATEST(
               similarity(base.normalized_title, base.normalized_q),
               similarity(base.normalized_summary, base.normalized_q),
               similarity(base.normalized_description, base.normalized_q),
-              word_similarity(base.normalized_title, base.normalized_q),
-              word_similarity(base.normalized_summary, base.normalized_q),
-              word_similarity(base.normalized_description, base.normalized_q)
+              similarity(base.normalized_author, base.normalized_q),
+              similarity(base.normalized_native_id, base.normalized_q),
+              similarity(base.normalized_tags, base.normalized_q),
+              word_similarity(base.normalized_q, base.normalized_title),
+              word_similarity(base.normalized_q, base.normalized_summary),
+              word_similarity(base.normalized_q, base.normalized_description),
+              word_similarity(base.normalized_q, base.normalized_author),
+              word_similarity(base.normalized_q, base.normalized_native_id),
+              word_similarity(base.normalized_q, base.normalized_tags)
             ) AS trgm_similarity,
             1.0 / (1.0 + (EXTRACT(EPOCH FROM (NOW() - base.updated_at_raw)) / 86400.0)) AS recency_boost
           FROM base

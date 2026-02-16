@@ -1,55 +1,59 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { toYoutubeUnifiedItem } from './toUnifiedItem'
 
 describe('toYoutubeUnifiedItem', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-16T12:00:00.000Z'))
-  })
+  it('maps youtube card to unified schema', () => {
+    const item = toYoutubeUnifiedItem(
+      {
+        id: 'dQw4w9WgXcQ',
+        videoId: 'dQw4w9WgXcQ',
+        categoryId: 'main',
+        title: 'Never Gonna Give You Up',
+        channelTitle: 'Rick Astley',
+        description: 'Official music video',
+        thumbnailUrl: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+        videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        viewCount: 123,
+        likeCount: 7,
+        addedAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      },
+      3,
+    )
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('fills optional values with defaults and current timestamp', () => {
-    const item = toYoutubeUnifiedItem({
-      nativeId: 'video-1',
-      title: 'Video title',
-      summary: 'Video summary',
-      description: 'Video description',
-      url: 'https://youtube.com/watch?v=video-1',
-    })
-
-    expect(item.id).toBe('youtube:video-1')
+    expect(item.id).toBe('youtube:dQw4w9WgXcQ')
     expect(item.provider).toBe('youtube')
     expect(item.type).toBe('video')
-    expect(item.tags).toEqual([])
-    expect(item.author).toBeNull()
-    expect(item.createdAt).toBe('2026-02-16T12:00:00.000Z')
-    expect(item.updatedAt).toBe('2026-02-16T12:00:00.000Z')
-    expect(item.savedAt).toBe('2026-02-16T12:00:00.000Z')
+    expect(item.nativeId).toBe('dQw4w9WgXcQ')
+    expect(item.title).toBe('Never Gonna Give You Up')
+    expect(item.author).toBe('Rick Astley')
+    expect(item.metrics).toEqual({ views: 123, likes: 7 })
+    expect(item.raw).toMatchObject({ categoryId: 'main', sortIndex: 3 })
   })
 
-  it('keeps explicit draft values when provided', () => {
-    const item = toYoutubeUnifiedItem({
-      nativeId: 'video-2',
-      title: 'Video title',
-      summary: 'Video summary',
-      description: 'Video description',
-      url: 'https://youtube.com/watch?v=video-2',
-      tags: ['tag'],
-      author: 'creator',
-      views: 10,
-      likes: 3,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    })
+  it('marks warehouse category as archived and keeps null like count', () => {
+    const item = toYoutubeUnifiedItem(
+      {
+        id: 'abc12345678',
+        videoId: 'abc12345678',
+        categoryId: 'warehouse',
+        title: '영상',
+        channelTitle: '채널',
+        description: '',
+        thumbnailUrl: 'https://img',
+        videoUrl: 'https://www.youtube.com/watch?v=abc12345678',
+        publishedAt: '2026-01-01T00:00:00.000Z',
+        viewCount: 0,
+        likeCount: null,
+        addedAt: '2026-01-02T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+      0,
+    )
 
-    expect(item.tags).toEqual(['tag'])
-    expect(item.author).toBe('creator')
-    expect(item.metrics).toEqual({ views: 10, likes: 3 })
-    expect(item.createdAt).toBe('2026-01-01T00:00:00.000Z')
-    expect(item.updatedAt).toBe('2026-01-02T00:00:00.000Z')
-    expect(item.savedAt).toBe('2026-02-16T12:00:00.000Z')
+    expect(item.status).toBe('archived')
+    expect(item.metrics).toEqual({ views: 0, likes: undefined })
+    expect(item.summary).toBe('영상 설명이 없습니다.')
   })
 })

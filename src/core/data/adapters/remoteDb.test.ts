@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   isRemoteSnapshotEnabled,
   loadGithubDashboardFromRemote,
+  loadYoutubeDashboardFromRemote,
   saveGithubDashboardToRemote,
+  saveYoutubeDashboardToRemote,
   searchUnifiedItems,
 } from './remoteDb'
 
@@ -25,6 +27,7 @@ describe('remoteDb adapter', () => {
 
     expect(isRemoteSnapshotEnabled()).toBe(false)
     expect(await loadGithubDashboardFromRemote()).toBeNull()
+    expect(await loadYoutubeDashboardFromRemote()).toBeNull()
     expect(await searchUnifiedItems({ query: 'react' })).toEqual([])
   })
 
@@ -69,6 +72,45 @@ describe('remoteDb adapter', () => {
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('loads youtube dashboard from remote', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        dashboard: {
+          cards: [],
+          categories: [
+            { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+            { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          ],
+          selectedCategoryId: 'main',
+        },
+      }),
+    )
+
+    const dashboard = await loadYoutubeDashboardFromRemote()
+    expect(dashboard?.selectedCategoryId).toBe('main')
+  })
+
+  it('saves youtube dashboard to remote', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(asResponse(200, { ok: true }))
+
+    await saveYoutubeDashboardToRemote({
+      cards: [],
+      categories: [
+        { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+      ],
+      selectedCategoryId: 'main',
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/youtube/dashboard')
   })
 
   it('forwards relevance search options to api query params', async () => {

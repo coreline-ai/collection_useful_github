@@ -6,9 +6,16 @@ import type {
   ProviderType,
   UnifiedItem,
   UnifiedItemType,
+  YouTubeDashboardSnapshot,
+  YouTubeVideoCard,
 } from '@shared/types'
 import { DEFAULT_MAIN_CATEGORY_ID, DEFAULT_WAREHOUSE_CATEGORY_ID } from '@constants'
-import { loadCategories, loadSelectedCategoryId } from '@shared/storage/localStorage'
+import {
+  loadCategories,
+  loadSelectedCategoryId,
+  loadYoutubeCategories,
+  loadYoutubeSelectedCategoryId,
+} from '@shared/storage/localStorage'
 
 export type UnifiedSearchParams = {
   query: string
@@ -155,6 +162,20 @@ const resolveFallbackCategories = (): { categories: Category[]; selectedCategory
   }
 }
 
+const resolveFallbackYoutubeCategories = (): { categories: Category[]; selectedCategoryId: CategoryId } => {
+  const categories = ensureSystemCategories(loadYoutubeCategories())
+  const selectedCategoryId = loadYoutubeSelectedCategoryId()
+  const resolvedSelectedCategoryId =
+    selectedCategoryId && categories.some((category) => category.id === selectedCategoryId)
+      ? selectedCategoryId
+      : DEFAULT_MAIN_CATEGORY_ID
+
+  return {
+    categories,
+    selectedCategoryId: resolvedSelectedCategoryId,
+  }
+}
+
 const mapUnifiedItemToGithubCard = (item: UnifiedItem): GitHubRepoCard => {
   const rawCard = (item.raw?.card ?? null) as Partial<GitHubRepoCard> | null
 
@@ -248,6 +269,94 @@ const toUnifiedGithubItem = (card: GitHubRepoCard, sortIndex: number): UnifiedIt
   }
 }
 
+const toUnifiedYoutubeItem = (card: YouTubeVideoCard, sortIndex: number): UnifiedItem => {
+  const normalizedVideoId = card.videoId || card.id
+  const normalizedDescription = card.description.replace(/\s+/g, ' ').trim()
+  const summary =
+    normalizedDescription.length === 0
+      ? '영상 설명이 없습니다.'
+      : normalizedDescription.length <= 180
+        ? normalizedDescription
+        : `${normalizedDescription.slice(0, 177)}...`
+
+  return {
+    id: `youtube:${normalizedVideoId}`,
+    provider: 'youtube',
+    type: 'video',
+    nativeId: normalizedVideoId,
+    title: card.title,
+    summary,
+    description: card.description,
+    url: card.videoUrl,
+    tags: [],
+    author: card.channelTitle,
+    language: null,
+    metrics: {
+      views: card.viewCount,
+      likes: card.likeCount ?? undefined,
+    },
+    status: card.categoryId === 'warehouse' ? 'archived' : 'active',
+    createdAt: toIso(card.publishedAt),
+    updatedAt: toIso(card.updatedAt),
+    savedAt: toIso(card.addedAt),
+    raw: {
+      categoryId: card.categoryId,
+      sortIndex,
+      card: {
+        ...card,
+        id: card.id || normalizedVideoId,
+        videoId: normalizedVideoId,
+      },
+    },
+  }
+}
+
+const mapUnifiedItemToYoutubeCard = (item: UnifiedItem): YouTubeVideoCard => {
+  const rawCard = (item.raw?.card ?? null) as Partial<YouTubeVideoCard> | null
+
+  if (rawCard && typeof rawCard === 'object' && rawCard.videoId) {
+    const videoId = String(rawCard.videoId)
+    return {
+      id: String(rawCard.id || videoId),
+      videoId,
+      categoryId: rawCard.categoryId || DEFAULT_MAIN_CATEGORY_ID,
+      title: String(rawCard.title || item.title || ''),
+      channelTitle: String(rawCard.channelTitle || item.author || ''),
+      description: String(rawCard.description || item.description || ''),
+      thumbnailUrl: String(rawCard.thumbnailUrl || ''),
+      videoUrl: String(rawCard.videoUrl || item.url || `https://www.youtube.com/watch?v=${videoId}`),
+      publishedAt: toIso(rawCard.publishedAt || item.createdAt),
+      viewCount: Number(rawCard.viewCount ?? item.metrics?.views ?? 0),
+      likeCount:
+        typeof rawCard.likeCount === 'number'
+          ? Number(rawCard.likeCount)
+          : typeof item.metrics?.likes === 'number'
+            ? Number(item.metrics.likes)
+            : null,
+      addedAt: toIso(rawCard.addedAt || item.savedAt),
+      updatedAt: toIso(rawCard.updatedAt || item.updatedAt),
+    }
+  }
+
+  const videoId = String(item.nativeId || '')
+
+  return {
+    id: videoId,
+    videoId,
+    categoryId: (item.raw?.categoryId as CategoryId | undefined) || DEFAULT_MAIN_CATEGORY_ID,
+    title: item.title || '',
+    channelTitle: item.author || '',
+    description: item.description || '',
+    thumbnailUrl: '',
+    videoUrl: item.url || `https://www.youtube.com/watch?v=${videoId}`,
+    publishedAt: toIso(item.createdAt),
+    viewCount: Number(item.metrics?.views ?? 0),
+    likeCount: typeof item.metrics?.likes === 'number' ? Number(item.metrics.likes) : null,
+    addedAt: toIso(item.savedAt),
+    updatedAt: toIso(item.updatedAt),
+  }
+}
+
 const loadGithubDashboardFromLegacyApi = async (): Promise<GitHubDashboardSnapshot> => {
   const itemsResponse = await requestWithRetry('/api/providers/github/items?limit=1000')
 
@@ -321,6 +430,43 @@ const saveGithubDashboardToLegacyApi = async (dashboard: GitHubDashboardSnapshot
   }
 }
 
+const loadYoutubeDashboardFromLegacyApi = async (): Promise<YouTubeDashboardSnapshot> => {
+  const itemsResponse = await requestWithRetry('/api/providers/youtube/items?limit=1000')
+
+  if (!itemsResponse.ok) {
+    throw new Error(await parseErrorMessage(itemsResponse, '유튜브 대시보드 데이터를 불러오지 못했습니다.'))
+  }
+
+  const itemsPayload = (await itemsResponse.json()) as ApiResponse<{ items: UnifiedItem[] }>
+  const cards = Array.isArray(itemsPayload.items)
+    ? itemsPayload.items.filter((item) => item.provider === 'youtube').map(mapUnifiedItemToYoutubeCard)
+    : []
+
+  const { categories, selectedCategoryId } = resolveFallbackYoutubeCategories()
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
+const saveYoutubeDashboardToLegacyApi = async (dashboard: YouTubeDashboardSnapshot): Promise<void> => {
+  const items = dashboard.cards.map((card, index) => toUnifiedYoutubeItem(card, index))
+
+  const response = await requestWithRetry('/api/providers/youtube/snapshot', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ items, notesByItem: {} }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '유튜브 대시보드 저장에 실패했습니다.'))
+  }
+}
+
 export const loadGithubDashboardFromRemote = async (): Promise<GitHubDashboardSnapshot | null> => {
   if (!isRemoteSnapshotEnabled()) {
     return null
@@ -365,6 +511,53 @@ export const saveGithubDashboardToRemote = async (dashboard: GitHubDashboardSnap
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, '대시보드 저장에 실패했습니다.'))
+  }
+}
+
+export const loadYoutubeDashboardFromRemote = async (): Promise<YouTubeDashboardSnapshot | null> => {
+  if (!isRemoteSnapshotEnabled()) {
+    return null
+  }
+
+  const response = await requestWithRetry('/api/youtube/dashboard')
+
+  if (response.status === 404) {
+    return loadYoutubeDashboardFromLegacyApi()
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '유튜브 대시보드 데이터를 불러오지 못했습니다.'))
+  }
+
+  const payload = (await response.json()) as ApiResponse<{ dashboard: YouTubeDashboardSnapshot }>
+
+  if (!payload.ok) {
+    throw new Error(payload.message || '유튜브 대시보드 데이터를 불러오지 못했습니다.')
+  }
+
+  return payload.dashboard
+}
+
+export const saveYoutubeDashboardToRemote = async (dashboard: YouTubeDashboardSnapshot): Promise<void> => {
+  if (!isRemoteSnapshotEnabled()) {
+    return
+  }
+
+  const response = await requestWithRetry('/api/youtube/dashboard', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dashboard }),
+  })
+
+  if (response.status === 404) {
+    await saveYoutubeDashboardToLegacyApi(dashboard)
+    return
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '유튜브 대시보드 저장에 실패했습니다.'))
   }
 }
 

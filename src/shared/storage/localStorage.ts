@@ -6,8 +6,19 @@ import {
   SELECTED_CATEGORY_STORAGE_KEY,
   THEME_STORAGE_KEY,
   TOP_SECTION_STORAGE_KEY,
+  YOUTUBE_CARDS_STORAGE_KEY,
+  YOUTUBE_CATEGORIES_STORAGE_KEY,
+  YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY,
 } from '../../constants'
-import type { Category, CategoryId, GitHubRepoCard, NotesByRepo, ThemeMode, TopSection } from '../../types'
+import type {
+  Category,
+  CategoryId,
+  GitHubRepoCard,
+  NotesByRepo,
+  ThemeMode,
+  TopSection,
+  YouTubeVideoCard,
+} from '../../types'
 
 const canUseStorage = (): boolean => typeof window !== 'undefined' && Boolean(window.localStorage)
 
@@ -137,4 +148,69 @@ export const saveTopSection = (section: TopSection): void => {
   }
 
   window.localStorage.setItem(TOP_SECTION_STORAGE_KEY, section)
+}
+
+export const loadYoutubeCards = (): YouTubeVideoCard[] => {
+  if (!canUseStorage()) {
+    return []
+  }
+
+  const rawCards = safeParse<Array<YouTubeVideoCard & { categoryId?: string; videoId?: string }>>(
+    window.localStorage.getItem(YOUTUBE_CARDS_STORAGE_KEY),
+    [],
+  )
+
+  return rawCards
+    .filter((card) => Boolean(card?.id))
+    .map((card) => {
+      const normalizedId = String(card.id)
+      const videoId = card.videoId ? String(card.videoId) : normalizedId
+      return {
+        ...card,
+        id: normalizedId,
+        videoId,
+        categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+      }
+    })
+}
+
+export const saveYoutubeCards = (cards: YouTubeVideoCard[]): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(YOUTUBE_CARDS_STORAGE_KEY, JSON.stringify(cards))
+}
+
+export const loadYoutubeCategories = (): Category[] => {
+  if (!canUseStorage()) {
+    return []
+  }
+
+  return safeParse<Category[]>(window.localStorage.getItem(YOUTUBE_CATEGORIES_STORAGE_KEY), [])
+}
+
+export const saveYoutubeCategories = (categories: Category[]): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(YOUTUBE_CATEGORIES_STORAGE_KEY, JSON.stringify(categories))
+}
+
+export const loadYoutubeSelectedCategoryId = (): CategoryId | null => {
+  if (!canUseStorage()) {
+    return null
+  }
+
+  const value = window.localStorage.getItem(YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY)
+  return value && value.trim() ? value : null
+}
+
+export const saveYoutubeSelectedCategoryId = (categoryId: CategoryId): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY, categoryId)
 }

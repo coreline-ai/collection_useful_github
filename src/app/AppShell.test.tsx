@@ -11,11 +11,14 @@ vi.mock('@features/github/services/github', () => ({
 
 vi.mock('@core/data/adapters/remoteDb', () => ({
   isRemoteSnapshotEnabled: vi.fn(() => false),
+  getRemoteBaseUrl: vi.fn(() => null),
   searchUnifiedItems: vi.fn().mockResolvedValue([]),
   exportUnifiedBackup: vi.fn(),
   importUnifiedBackup: vi.fn(),
   loadGithubDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
+  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
 }))
 
 describe('AppShell', () => {
@@ -61,6 +64,15 @@ describe('AppShell', () => {
     expect(screen.getByText('북마크 기능은 준비중입니다.')).toBeInTheDocument()
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '통합 검색어' })).not.toBeInTheDocument()
+  })
+
+  it('switches to youtube board with youtube input', () => {
+    render(<AppShell />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
+
+    expect(screen.getByLabelText('YouTube 영상 URL')).toBeInTheDocument()
+    expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
   })
 
   it('restores selected section from localStorage', () => {

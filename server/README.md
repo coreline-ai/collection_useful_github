@@ -8,6 +8,8 @@
 cp .env.example .env
 ```
 
+YouTube 카드 기능을 사용하려면 `YOUTUBE_API_KEY`를 설정하세요.
+
 ## 2) PostgreSQL 준비
 
 ### Docker 사용(권장)
@@ -43,6 +45,9 @@ npm run dev
 - `GET /api/health/deep`
 - `GET /api/github/dashboard`
 - `PUT /api/github/dashboard`
+- `GET /api/youtube/videos/:videoId`
+- `GET /api/youtube/dashboard`
+- `PUT /api/youtube/dashboard`
 - `PUT /api/providers/:provider/snapshot`
 - `GET /api/providers/:provider/items`
 - `GET /api/items/:id`
