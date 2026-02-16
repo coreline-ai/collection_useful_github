@@ -29,6 +29,7 @@ export const AppShell = () => {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => resolveInitialTheme(loadThemeMode()))
   const [githubSync, setGithubSync] = useState<SyncSnapshot>(INITIAL_SYNC_SNAPSHOT)
   const [youtubeSync, setYoutubeSync] = useState<SyncSnapshot>(INITIAL_SYNC_SNAPSHOT)
+  const [bookmarkSync, setBookmarkSync] = useState<SyncSnapshot>(INITIAL_SYNC_SNAPSHOT)
 
   useEffect(() => {
     runInitialMigrations()
@@ -43,7 +44,14 @@ export const AppShell = () => {
     saveThemeMode(themeMode)
   }, [themeMode])
 
-  const activeSync = activeTopSection === 'github' ? githubSync : activeTopSection === 'youtube' ? youtubeSync : null
+  const activeSync =
+    activeTopSection === 'github'
+      ? githubSync
+      : activeTopSection === 'youtube'
+        ? youtubeSync
+        : activeTopSection === 'bookmark'
+          ? bookmarkSync
+          : null
 
   return (
     <div className="app-shell">
@@ -76,7 +84,13 @@ export const AppShell = () => {
           onSyncStatusChange={setYoutubeSync}
         />
       ) : null}
-      {activeTopSection === 'bookmark' ? <BookmarkFeatureEntry /> : null}
+      {activeTopSection === 'bookmark' ? (
+        <BookmarkFeatureEntry
+          themeMode={themeMode}
+          onToggleTheme={() => setThemeMode((current) => (current === 'light' ? 'dark' : 'light'))}
+          onSyncStatusChange={setBookmarkSync}
+        />
+      ) : null}
     </div>
   )
 }

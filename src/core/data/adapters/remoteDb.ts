@@ -1,4 +1,6 @@
 import type {
+  BookmarkCard,
+  BookmarkDashboardSnapshot,
   Category,
   CategoryId,
   GitHubRepoCard,
@@ -11,6 +13,8 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MAIN_CATEGORY_ID, DEFAULT_WAREHOUSE_CATEGORY_ID } from '@constants'
 import {
+  loadBookmarkCategories,
+  loadBookmarkSelectedCategoryId,
   loadCategories,
   loadSelectedCategoryId,
   loadYoutubeCategories,
@@ -37,6 +41,8 @@ export type UnifiedBackupPayload = {
     meta: Record<string, unknown>
   }
 }
+
+export type BookmarkCardDraft = Omit<BookmarkCard, 'categoryId' | 'addedAt'>
 
 type ApiResponse<T> = {
   ok: boolean
@@ -165,6 +171,20 @@ const resolveFallbackCategories = (): { categories: Category[]; selectedCategory
 const resolveFallbackYoutubeCategories = (): { categories: Category[]; selectedCategoryId: CategoryId } => {
   const categories = ensureSystemCategories(loadYoutubeCategories())
   const selectedCategoryId = loadYoutubeSelectedCategoryId()
+  const resolvedSelectedCategoryId =
+    selectedCategoryId && categories.some((category) => category.id === selectedCategoryId)
+      ? selectedCategoryId
+      : DEFAULT_MAIN_CATEGORY_ID
+
+  return {
+    categories,
+    selectedCategoryId: resolvedSelectedCategoryId,
+  }
+}
+
+const resolveFallbackBookmarkCategories = (): { categories: Category[]; selectedCategoryId: CategoryId } => {
+  const categories = ensureSystemCategories(loadBookmarkCategories())
+  const selectedCategoryId = loadBookmarkSelectedCategoryId()
   const resolvedSelectedCategoryId =
     selectedCategoryId && categories.some((category) => category.id === selectedCategoryId)
       ? selectedCategoryId
@@ -357,6 +377,79 @@ const mapUnifiedItemToYoutubeCard = (item: UnifiedItem): YouTubeVideoCard => {
   }
 }
 
+const toUnifiedBookmarkItem = (card: BookmarkCard, sortIndex: number): UnifiedItem => {
+  return {
+    id: `bookmark:${card.normalizedUrl}`,
+    provider: 'bookmark',
+    type: 'bookmark',
+    nativeId: card.normalizedUrl,
+    title: card.title,
+    summary: card.excerpt,
+    description: card.excerpt,
+    url: card.url,
+    tags: Array.isArray(card.tags) ? card.tags : [],
+    author: card.domain,
+    language: null,
+    metrics: {},
+    status: card.categoryId === 'warehouse' ? 'archived' : 'active',
+    createdAt: toIso(card.addedAt),
+    updatedAt: toIso(card.updatedAt),
+    savedAt: toIso(card.addedAt),
+    raw: {
+      categoryId: card.categoryId,
+      metadataStatus: card.metadataStatus,
+      sortIndex,
+      card,
+    },
+  }
+}
+
+const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
+  const rawCard = (item.raw?.card ?? null) as Partial<BookmarkCard> | null
+
+  if (rawCard && typeof rawCard === 'object' && rawCard.normalizedUrl) {
+    const normalizedUrl = String(rawCard.normalizedUrl)
+
+    return {
+      id: String(rawCard.id || normalizedUrl),
+      categoryId: rawCard.categoryId || DEFAULT_MAIN_CATEGORY_ID,
+      url: String(rawCard.url || item.url || normalizedUrl),
+      normalizedUrl,
+      canonicalUrl: rawCard.canonicalUrl ? String(rawCard.canonicalUrl) : null,
+      domain: String(rawCard.domain || item.author || ''),
+      title: String(rawCard.title || item.title || normalizedUrl),
+      excerpt: String(rawCard.excerpt || item.summary || item.description || ''),
+      thumbnailUrl: rawCard.thumbnailUrl ? String(rawCard.thumbnailUrl) : null,
+      faviconUrl: rawCard.faviconUrl ? String(rawCard.faviconUrl) : null,
+      tags: Array.isArray(rawCard.tags) ? rawCard.tags.map((tag) => String(tag)) : item.tags || [],
+      addedAt: toIso(rawCard.addedAt || item.savedAt),
+      updatedAt: toIso(rawCard.updatedAt || item.updatedAt),
+      metadataStatus: rawCard.metadataStatus === 'ok' ? 'ok' : 'fallback',
+    }
+  }
+
+  const normalizedUrl = String(item.nativeId || item.url || '')
+  const domain = item.author || ''
+  const excerpt = item.summary || item.description || '미리보기를 가져오지 못했습니다.'
+
+  return {
+    id: normalizedUrl,
+    categoryId: (item.raw?.categoryId as CategoryId | undefined) || DEFAULT_MAIN_CATEGORY_ID,
+    url: item.url || normalizedUrl,
+    normalizedUrl,
+    canonicalUrl: null,
+    domain,
+    title: item.title || domain || normalizedUrl,
+    excerpt,
+    thumbnailUrl: null,
+    faviconUrl: null,
+    tags: Array.isArray(item.tags) ? item.tags.map((tag) => String(tag)) : [],
+    addedAt: toIso(item.savedAt),
+    updatedAt: toIso(item.updatedAt),
+    metadataStatus: item.raw?.metadataStatus === 'ok' ? 'ok' : 'fallback',
+  }
+}
+
 const loadGithubDashboardFromLegacyApi = async (): Promise<GitHubDashboardSnapshot> => {
   const itemsResponse = await requestWithRetry('/api/providers/github/items?limit=1000')
 
@@ -467,6 +560,43 @@ const saveYoutubeDashboardToLegacyApi = async (dashboard: YouTubeDashboardSnapsh
   }
 }
 
+const loadBookmarkDashboardFromLegacyApi = async (): Promise<BookmarkDashboardSnapshot> => {
+  const itemsResponse = await requestWithRetry('/api/providers/bookmark/items?limit=1000')
+
+  if (!itemsResponse.ok) {
+    throw new Error(await parseErrorMessage(itemsResponse, '북마크 대시보드 데이터를 불러오지 못했습니다.'))
+  }
+
+  const itemsPayload = (await itemsResponse.json()) as ApiResponse<{ items: UnifiedItem[] }>
+  const cards = Array.isArray(itemsPayload.items)
+    ? itemsPayload.items.filter((item) => item.provider === 'bookmark').map(mapUnifiedItemToBookmarkCard)
+    : []
+
+  const { categories, selectedCategoryId } = resolveFallbackBookmarkCategories()
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
+const saveBookmarkDashboardToLegacyApi = async (dashboard: BookmarkDashboardSnapshot): Promise<void> => {
+  const items = dashboard.cards.map((card, index) => toUnifiedBookmarkItem(card, index))
+
+  const response = await requestWithRetry('/api/providers/bookmark/snapshot', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ items, notesByItem: {} }),
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '북마크 대시보드 저장에 실패했습니다.'))
+  }
+}
+
 export const loadGithubDashboardFromRemote = async (): Promise<GitHubDashboardSnapshot | null> => {
   if (!isRemoteSnapshotEnabled()) {
     return null
@@ -558,6 +688,100 @@ export const saveYoutubeDashboardToRemote = async (dashboard: YouTubeDashboardSn
 
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, '유튜브 대시보드 저장에 실패했습니다.'))
+  }
+}
+
+export const loadBookmarkDashboardFromRemote = async (): Promise<BookmarkDashboardSnapshot | null> => {
+  if (!isRemoteSnapshotEnabled()) {
+    return null
+  }
+
+  const response = await requestWithRetry('/api/bookmark/dashboard')
+
+  if (response.status === 404) {
+    return loadBookmarkDashboardFromLegacyApi()
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '북마크 대시보드 데이터를 불러오지 못했습니다.'))
+  }
+
+  const payload = (await response.json()) as ApiResponse<{ dashboard: BookmarkDashboardSnapshot }>
+
+  if (!payload.ok) {
+    throw new Error(payload.message || '북마크 대시보드 데이터를 불러오지 못했습니다.')
+  }
+
+  return payload.dashboard
+}
+
+export const saveBookmarkDashboardToRemote = async (dashboard: BookmarkDashboardSnapshot): Promise<void> => {
+  if (!isRemoteSnapshotEnabled()) {
+    return
+  }
+
+  const response = await requestWithRetry('/api/bookmark/dashboard', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dashboard }),
+  })
+
+  if (response.status === 404) {
+    await saveBookmarkDashboardToLegacyApi(dashboard)
+    return
+  }
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '북마크 대시보드 저장에 실패했습니다.'))
+  }
+}
+
+export const fetchBookmarkMetadata = async (url: string): Promise<BookmarkCardDraft> => {
+  if (!isRemoteSnapshotEnabled()) {
+    throw new Error('원격 DB API가 설정되지 않았습니다.')
+  }
+
+  const response = await requestWithRetry(`/api/bookmark/metadata?url=${encodeURIComponent(url)}`)
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '북마크 메타데이터를 불러오지 못했습니다.'))
+  }
+
+  const payload = (await response.json()) as ApiResponse<{
+    metadata: {
+      url: string
+      normalizedUrl: string
+      canonicalUrl: string | null
+      domain: string
+      title: string
+      excerpt: string
+      thumbnailUrl: string | null
+      faviconUrl: string | null
+      tags: string[]
+      metadataStatus: 'ok' | 'fallback'
+      updatedAt: string
+    }
+  }>
+
+  if (!payload.ok || !payload.metadata) {
+    throw new Error(payload.message || '북마크 메타데이터를 불러오지 못했습니다.')
+  }
+
+  return {
+    id: payload.metadata.normalizedUrl,
+    url: payload.metadata.url,
+    normalizedUrl: payload.metadata.normalizedUrl,
+    canonicalUrl: payload.metadata.canonicalUrl,
+    domain: payload.metadata.domain,
+    title: payload.metadata.title,
+    excerpt: payload.metadata.excerpt,
+    thumbnailUrl: payload.metadata.thumbnailUrl,
+    faviconUrl: payload.metadata.faviconUrl,
+    tags: Array.isArray(payload.metadata.tags) ? payload.metadata.tags : [],
+    updatedAt: payload.metadata.updatedAt,
+    metadataStatus: payload.metadata.metadataStatus === 'ok' ? 'ok' : 'fallback',
   }
 }
 

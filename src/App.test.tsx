@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { THEME_STORAGE_KEY, TOP_SECTION_STORAGE_KEY } from './constants'
-import type { GitHubRepoCard, RepoDetailData, YouTubeVideoCard } from './types'
+import type { BookmarkCard, GitHubRepoCard, RepoDetailData, YouTubeVideoCard } from './types'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
@@ -16,6 +16,16 @@ vi.mock('@features/youtube/services/youtube', () => ({
   buildYouTubeSummary: vi.fn((value: string) => value),
 }))
 
+vi.mock('@features/bookmark/services/bookmark', () => ({
+  parseBookmarkUrl: vi.fn(),
+  fetchBookmarkMetadata: vi.fn(),
+  createBookmarkCardFromDraft: vi.fn((draft: Omit<BookmarkCard, 'categoryId' | 'addedAt'>) => ({
+    ...draft,
+    categoryId: 'main',
+    addedAt: '2026-02-15T00:00:00.000Z',
+  })),
+}))
+
 vi.mock('@core/data/adapters/remoteDb', () => ({
   isRemoteSnapshotEnabled: vi.fn(() => false),
   getRemoteBaseUrl: vi.fn(() => null),
@@ -23,6 +33,8 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
+  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   searchUnifiedItems: vi.fn().mockResolvedValue([]),
   exportUnifiedBackup: vi.fn().mockResolvedValue({
     version: 1,
@@ -34,6 +46,7 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
 
 const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
 const { parseYouTubeVideoUrl, fetchYouTubeVideo } = await import('@features/youtube/services/youtube')
+const { parseBookmarkUrl, fetchBookmarkMetadata } = await import('@features/bookmark/services/bookmark')
 const {
   isRemoteSnapshotEnabled,
   loadGithubDashboardFromRemote,
@@ -105,6 +118,21 @@ const mockYoutubeCard: YouTubeVideoCard = {
   updatedAt: '2026-02-15T00:00:00.000Z',
 }
 
+const mockBookmarkDraft: Omit<BookmarkCard, 'categoryId' | 'addedAt'> = {
+  id: 'https://openai.com/research',
+  url: 'https://openai.com/research',
+  normalizedUrl: 'https://openai.com/research',
+  canonicalUrl: 'https://openai.com/research',
+  domain: 'openai.com',
+  title: 'OpenAI Research',
+  excerpt: 'OpenAI research updates and papers.',
+  thumbnailUrl: null,
+  faviconUrl: 'https://openai.com/favicon.ico',
+  tags: ['ai'],
+  updatedAt: '2026-02-15T00:00:00.000Z',
+  metadataStatus: 'ok',
+}
+
 const mockMatchMedia = (matches: boolean) => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -137,6 +165,16 @@ describe('App', () => {
       input.includes('watch?v=') ? { videoId: 'dQw4w9WgXcQ' } : null,
     )
     vi.mocked(fetchYouTubeVideo).mockResolvedValue(mockYoutubeCard)
+    vi.mocked(parseBookmarkUrl).mockImplementation((input: string) =>
+      input.includes('openai.com/research')
+        ? {
+            url: 'https://openai.com/research',
+            normalizedUrl: 'https://openai.com/research',
+            domain: 'openai.com',
+          }
+        : null,
+    )
+    vi.mocked(fetchBookmarkMetadata).mockResolvedValue(mockBookmarkDraft)
   })
 
   it('uses system dark mode on first load when no saved theme', () => {
@@ -196,6 +234,24 @@ describe('App', () => {
     expect(screen.getByText('Never Gonna Give You Up')).toBeInTheDocument()
   })
 
+  it('adds bookmark card and filters within bookmark tab', async () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '북마크' }))
+    fireEvent.change(screen.getByLabelText('북마크 URL'), {
+      target: { value: 'https://openai.com/research' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '추가' }))
+
+    await screen.findByText('OpenAI Research')
+    expect(screen.getByText('openai.com', { selector: '.repo-owner' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '북마크 링크 열기' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('등록 카드 검색'), { target: { value: 'openai' } })
+    expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
+    expect(screen.getByText('OpenAI Research')).toBeInTheDocument()
+  })
+
   it('does not immediately degrade to local-only mode on first transient youtube remote save failure', async () => {
     vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
     vi.mocked(saveYoutubeDashboardToRemote)
@@ -242,7 +298,8 @@ describe('App', () => {
     render(<App />)
 
     expect(screen.getByRole('tab', { name: '북마크' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByText('북마크 기능은 준비중입니다.')).toBeInTheDocument()
+    expect(screen.getByLabelText('북마크 URL')).toBeInTheDocument()
+    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
   })
 
   it('adds repo card and blocks duplicate', async () => {

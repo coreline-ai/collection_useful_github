@@ -1,6 +1,8 @@
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import dns from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { getClient, query } from './db.js'
 import { migrate } from './migrate.js'
 
@@ -10,11 +12,14 @@ const PROVIDERS = new Set(['github', 'youtube', 'bookmark'])
 const TYPES = new Set(['repository', 'video', 'bookmark'])
 const DASHBOARD_META_KEY = 'github_dashboard_v1'
 const YOUTUBE_DASHBOARD_META_KEY = 'youtube_dashboard_v1'
+const BOOKMARK_DASHBOARD_META_KEY = 'bookmark_dashboard_v1'
 const youtubeApiKey = (process.env.YOUTUBE_API_KEY || '').trim()
 const youtubeTimeoutSeconds = Number(process.env.YOUTUBE_API_TIMEOUT_SECONDS || 12)
 const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeoutSeconds > 0
   ? Math.floor(youtubeTimeoutSeconds * 1000)
   : 12000
+const bookmarkFetchTimeoutMs = Number(process.env.BOOKMARK_FETCH_TIMEOUT_MS || 10_000)
+const bookmarkMaxResponseBytes = Number(process.env.BOOKMARK_MAX_RESPONSE_BYTES || 1_048_576)
 
 const DEFAULT_CATEGORIES = [
   {
@@ -274,6 +279,21 @@ const normalizeYoutubeDashboardPayload = (rawDashboard) => {
   }
 }
 
+const normalizeBookmarkDashboardPayload = (rawDashboard) => {
+  const dashboard = rawDashboard && typeof rawDashboard === 'object' ? rawDashboard : {}
+  const cards = Array.isArray(dashboard.cards) ? dashboard.cards : []
+  const categories = normalizeCategories(dashboard.categories)
+  const selectedCategoryId = categories.some((category) => category.id === dashboard.selectedCategoryId)
+    ? dashboard.selectedCategoryId
+    : 'main'
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
 const toGithubUnifiedItems = (cards) => {
   return cards.map((card, index) => {
     const normalizedCard = {
@@ -382,6 +402,52 @@ const toYoutubeUnifiedItems = (cards) => {
   })
 }
 
+const toBookmarkUnifiedItems = (cards) => {
+  return cards.map((card, index) => {
+    const normalizedUrl = String(card.normalizedUrl || card.id || '').trim()
+    const normalizedCard = {
+      id: String(card.id || normalizedUrl),
+      normalizedUrl,
+      categoryId: String(card.categoryId || 'main'),
+      url: String(card.url || normalizedUrl),
+      canonicalUrl: card.canonicalUrl ? String(card.canonicalUrl) : null,
+      domain: String(card.domain || ''),
+      title: String(card.title || card.domain || normalizedUrl),
+      excerpt: String(card.excerpt || ''),
+      thumbnailUrl: card.thumbnailUrl ? String(card.thumbnailUrl) : null,
+      faviconUrl: card.faviconUrl ? String(card.faviconUrl) : null,
+      tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : [],
+      addedAt: toIso(card.addedAt || new Date().toISOString()),
+      updatedAt: toIso(card.updatedAt || new Date().toISOString()),
+      metadataStatus: card.metadataStatus === 'ok' ? 'ok' : 'fallback',
+    }
+
+    return normalizeItem('bookmark', {
+      id: `bookmark:${normalizedCard.normalizedUrl}`,
+      type: 'bookmark',
+      nativeId: normalizedCard.normalizedUrl,
+      title: normalizedCard.title,
+      summary: normalizedCard.excerpt,
+      description: normalizedCard.excerpt,
+      url: normalizedCard.url,
+      tags: normalizedCard.tags,
+      author: normalizedCard.domain,
+      language: null,
+      metrics: {},
+      status: normalizedCard.categoryId === 'warehouse' ? 'archived' : 'active',
+      createdAt: normalizedCard.addedAt,
+      updatedAt: normalizedCard.updatedAt,
+      savedAt: normalizedCard.addedAt,
+      raw: {
+        card: normalizedCard,
+        categoryId: normalizedCard.categoryId,
+        sortIndex: index,
+        metadataStatus: normalizedCard.metadataStatus,
+      },
+    })
+  })
+}
+
 const mapItemRowToGithubCard = (row) => {
   const raw = row.raw && typeof row.raw === 'object' ? row.raw : {}
 
@@ -483,6 +549,50 @@ const mapItemRowToYoutubeCard = (row) => {
     likeCount: typeof row.metrics?.likes === 'number' ? Number(row.metrics.likes) : null,
     addedAt: toIso(row.savedAt),
     updatedAt: toIso(row.updatedAt),
+  }
+}
+
+const mapItemRowToBookmarkCard = (row) => {
+  const raw = row.raw && typeof row.raw === 'object' ? row.raw : {}
+
+  if (raw.card && typeof raw.card === 'object') {
+    const card = raw.card
+    const normalizedUrl = String(card.normalizedUrl || row.nativeId || row.url || '')
+
+    return {
+      id: String(card.id || normalizedUrl),
+      categoryId: String(card.categoryId || raw.categoryId || 'main'),
+      url: String(card.url || row.url || normalizedUrl),
+      normalizedUrl,
+      canonicalUrl: card.canonicalUrl ? String(card.canonicalUrl) : null,
+      domain: String(card.domain || row.author || ''),
+      title: String(card.title || row.title || normalizedUrl),
+      excerpt: String(card.excerpt || row.summary || row.description || ''),
+      thumbnailUrl: card.thumbnailUrl ? String(card.thumbnailUrl) : null,
+      faviconUrl: card.faviconUrl ? String(card.faviconUrl) : null,
+      tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : row.tags || [],
+      addedAt: toIso(card.addedAt || row.savedAt),
+      updatedAt: toIso(card.updatedAt || row.updatedAt),
+      metadataStatus: card.metadataStatus === 'ok' ? 'ok' : 'fallback',
+    }
+  }
+
+  const normalizedUrl = String(row.nativeId || row.url || '')
+  return {
+    id: normalizedUrl,
+    categoryId: String(raw.categoryId || 'main'),
+    url: String(row.url || normalizedUrl),
+    normalizedUrl,
+    canonicalUrl: null,
+    domain: String(row.author || ''),
+    title: String(row.title || row.author || normalizedUrl),
+    excerpt: String(row.summary || row.description || '미리보기를 가져오지 못했습니다.'),
+    thumbnailUrl: null,
+    faviconUrl: null,
+    tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
+    addedAt: toIso(row.savedAt),
+    updatedAt: toIso(row.updatedAt),
+    metadataStatus: raw.metadataStatus === 'ok' ? 'ok' : 'fallback',
   }
 }
 
@@ -799,12 +909,150 @@ const persistYoutubeDashboard = async (dashboard) => {
   }
 }
 
-const fetchWithTimeout = async (url, timeoutMs) => {
+const loadBookmarkDashboard = async () => {
+  const [itemsResult, metaResult] = await Promise.all([
+    query(
+      `
+        SELECT
+          id,
+          provider,
+          type,
+          native_id AS "nativeId",
+          title,
+          summary,
+          description,
+          url,
+          tags,
+          author,
+          language,
+          metrics,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt",
+          saved_at AS "savedAt",
+          raw
+        FROM unified_items
+        WHERE provider = 'bookmark'
+        ORDER BY COALESCE((raw->>'sortIndex')::int, 2147483647), saved_at DESC
+      `,
+    ),
+    query(
+      `
+        SELECT value
+        FROM unified_meta
+        WHERE key = $1
+      `,
+      [BOOKMARK_DASHBOARD_META_KEY],
+    ),
+  ])
+
+  const cards = itemsResult.rows.map(mapItemRowToBookmarkCard)
+  const metaValue = metaResult.rowCount ? metaResult.rows[0].value : null
+  const categories = normalizeCategories(metaValue?.categories)
+  const selectedCategoryId = categories.some((category) => category.id === metaValue?.selectedCategoryId)
+    ? metaValue.selectedCategoryId
+    : 'main'
+
+  return {
+    cards,
+    categories,
+    selectedCategoryId,
+  }
+}
+
+const persistBookmarkDashboard = async (dashboard) => {
+  const normalized = normalizeBookmarkDashboardPayload(dashboard)
+  const items = toBookmarkUnifiedItems(normalized.cards)
+
+  const client = await getClient()
+
+  try {
+    await client.query('BEGIN')
+
+    await client.query('DELETE FROM unified_items WHERE provider = $1', ['bookmark'])
+
+    const insertItemSql = `
+      INSERT INTO unified_items (
+        id, provider, type, native_id, title, summary, description, url, tags, author, language,
+        metrics, status, created_at, updated_at, saved_at, raw
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12::jsonb, $13, $14::timestamptz, $15::timestamptz, $16::timestamptz, $17::jsonb
+      )
+    `
+
+    for (const item of items) {
+      await client.query(insertItemSql, [
+        item.id,
+        item.provider,
+        item.type,
+        item.nativeId,
+        item.title,
+        item.summary,
+        item.description,
+        item.url,
+        item.tags,
+        item.author,
+        item.language,
+        JSON.stringify(item.metrics),
+        item.status,
+        item.createdAt,
+        item.updatedAt,
+        item.savedAt,
+        JSON.stringify(item.raw),
+      ])
+    }
+
+    await client.query(
+      `
+        INSERT INTO unified_meta (key, value, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+      `,
+      [
+        BOOKMARK_DASHBOARD_META_KEY,
+        JSON.stringify({
+          categories: normalized.categories,
+          selectedCategoryId: normalized.selectedCategoryId,
+          updatedAt: new Date().toISOString(),
+        }),
+      ],
+    )
+
+    await client.query(
+      `
+        INSERT INTO unified_meta (key, value, updated_at)
+        VALUES ($1, $2::jsonb, NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+      `,
+      ['snapshot:bookmark', JSON.stringify({ items: items.length, notes: 0 })],
+    )
+
+    await client.query('COMMIT')
+
+    return {
+      items: items.length,
+      categories: normalized.categories.length,
+    }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+const fetchWithTimeout = async (url, timeoutMs, init = {}) => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    return await fetch(url, { signal: controller.signal })
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
   } finally {
     clearTimeout(timer)
   }
@@ -824,6 +1072,314 @@ const parseYoutubeErrorMessage = (payload, fallback) => {
   const firstError = Array.isArray(rawError.errors) ? rawError.errors[0] : null
   return typeof firstError?.message === 'string' && firstError.message ? firstError.message : fallback
 }
+
+const TRACKING_QUERY_KEY_SET = new Set(['fbclid', 'gclid'])
+const BLOCKED_HOSTNAME_SET = new Set(['localhost'])
+const BLOCKED_IPV6_SET = new Set(['::1'])
+
+const decodeHtmlEntities = (value) => {
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+}
+
+const collapseText = (value) => decodeHtmlEntities(String(value || '').replace(/\s+/g, ' ').trim())
+
+const stripTags = (value) => collapseText(String(value || '').replace(/<[^>]*>/g, ' '))
+
+const truncateText = (value, maxLength) => {
+  const text = collapseText(value)
+  if (text.length <= maxLength) {
+    return text
+  }
+
+  return `${text.slice(0, maxLength - 3)}...`
+}
+
+const removeTrackingParams = (url) => {
+  const keys = Array.from(url.searchParams.keys())
+  keys.forEach((key) => {
+    const lower = key.toLowerCase()
+    if (lower.startsWith('utm_') || TRACKING_QUERY_KEY_SET.has(lower)) {
+      url.searchParams.delete(key)
+    }
+  })
+}
+
+const normalizeBookmarkUrl = (input) => {
+  const raw = String(input || '').trim()
+  if (!raw) {
+    return null
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) {
+    return null
+  }
+
+  let candidate = raw
+  if (!/^https?:\/\//i.test(candidate)) {
+    candidate = `https://${candidate}`
+  }
+
+  let url
+  try {
+    url = new URL(candidate)
+  } catch {
+    return null
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return null
+  }
+
+  url.hostname = url.hostname.toLowerCase()
+  url.hash = ''
+  removeTrackingParams(url)
+
+  if (url.pathname.length > 1) {
+    url.pathname = url.pathname.replace(/\/+$/, '')
+    if (!url.pathname) {
+      url.pathname = '/'
+    }
+  }
+
+  const normalizedUrl = url.toString().replace(/\?$/, '')
+  const domain = url.hostname.replace(/^www\./, '')
+
+  return {
+    normalizedUrl,
+    domain,
+  }
+}
+
+const isPrivateIPv4 = (address) => {
+  const [a, b] = String(address || '').split('.').map((value) => Number(value))
+  if (!Number.isFinite(a) || !Number.isFinite(b)) {
+    return false
+  }
+
+  if (a === 10 || a === 127 || a === 0) {
+    return true
+  }
+
+  if (a === 192 && b === 168) {
+    return true
+  }
+
+  if (a === 172 && b >= 16 && b <= 31) {
+    return true
+  }
+
+  if (a === 169 && b === 254) {
+    return true
+  }
+
+  return false
+}
+
+const isPrivateIPv6 = (address) => {
+  const lower = String(address || '').toLowerCase()
+  if (!lower) {
+    return false
+  }
+
+  if (BLOCKED_IPV6_SET.has(lower)) {
+    return true
+  }
+
+  if (lower.startsWith('fc') || lower.startsWith('fd')) {
+    return true
+  }
+
+  if (lower.startsWith('fe80:')) {
+    return true
+  }
+
+  return false
+}
+
+const isPrivateIp = (address) => {
+  const version = isIP(address)
+  if (version === 4) {
+    return isPrivateIPv4(address)
+  }
+  if (version === 6) {
+    return isPrivateIPv6(address)
+  }
+  return false
+}
+
+const assertBookmarkUrlSafe = async (targetUrl) => {
+  const url = new URL(targetUrl)
+  const hostname = url.hostname.toLowerCase()
+
+  if (BLOCKED_HOSTNAME_SET.has(hostname)) {
+    const error = new Error('보안 정책상 접근할 수 없는 주소입니다.')
+    error.status = 422
+    throw error
+  }
+
+  if (isPrivateIp(hostname)) {
+    const error = new Error('사설 네트워크 주소는 허용되지 않습니다.')
+    error.status = 422
+    throw error
+  }
+
+  try {
+    const lookups = await dns.lookup(hostname, { all: true })
+    if (lookups.some((entry) => isPrivateIp(entry.address))) {
+      const error = new Error('사설 네트워크로 해석되는 주소는 허용되지 않습니다.')
+      error.status = 422
+      throw error
+    }
+  } catch (lookupError) {
+    if (lookupError?.status) {
+      throw lookupError
+    }
+    // DNS lookup failure is handled by fetch phase
+  }
+}
+
+const parseAttributeMap = (tag) => {
+  const attributes = {}
+  const pattern = /([a-zA-Z_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g
+  let match
+
+  while ((match = pattern.exec(tag)) !== null) {
+    const key = String(match[1] || '').toLowerCase()
+    const value = match[2] ?? match[3] ?? match[4] ?? ''
+    if (key) {
+      attributes[key] = value
+    }
+  }
+
+  return attributes
+}
+
+const extractMetaContent = (html, ...keys) => {
+  const targets = keys.map((key) => key.toLowerCase())
+  const metaPattern = /<meta\b[^>]*>/gi
+  let match
+
+  while ((match = metaPattern.exec(html)) !== null) {
+    const attrs = parseAttributeMap(match[0])
+    const name = String(attrs.property || attrs.name || '').toLowerCase()
+    if (!name || !targets.includes(name)) {
+      continue
+    }
+
+    const content = collapseText(attrs.content || '')
+    if (content) {
+      return content
+    }
+  }
+
+  return null
+}
+
+const extractTitle = (html) => {
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  return titleMatch ? collapseText(stripTags(titleMatch[1])) : null
+}
+
+const extractCanonicalUrl = (html, baseUrl) => {
+  const canonicalMatch = html.match(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*>/i)
+  if (!canonicalMatch) {
+    return null
+  }
+
+  const attrs = parseAttributeMap(canonicalMatch[0])
+  if (!attrs.href) {
+    return null
+  }
+
+  try {
+    return new URL(attrs.href, baseUrl).toString()
+  } catch {
+    return null
+  }
+}
+
+const extractFirstParagraph = (html) => {
+  const paragraphPattern = /<p\b[^>]*>([\s\S]*?)<\/p>/gi
+  let match
+
+  while ((match = paragraphPattern.exec(html)) !== null) {
+    const text = stripTags(match[1])
+    if (text.length >= 20) {
+      return text
+    }
+  }
+
+  return null
+}
+
+const readResponseTextWithLimit = async (response, maxBytes) => {
+  const text = await response.text()
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+    return text.slice(0, maxBytes)
+  }
+  return text
+}
+
+const fetchBookmarkHtmlWithRedirect = async (targetUrl) => {
+  const userAgent = 'useful-git-info-bookmark-bot/1.0 (+https://github.com/coreline-ai/collection_useful_github)'
+  let currentUrl = targetUrl
+
+  for (let redirectCount = 0; redirectCount <= 3; redirectCount += 1) {
+    await assertBookmarkUrlSafe(currentUrl)
+
+    const response = await fetchWithTimeout(currentUrl, bookmarkFetchTimeoutMs, {
+      redirect: 'manual',
+      headers: {
+        'User-Agent': userAgent,
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    })
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      if (redirectCount === 3) {
+        const error = new Error('리디렉션 횟수 제한을 초과했습니다.')
+        error.status = 422
+        throw error
+      }
+
+      const location = response.headers.get('location')
+      if (!location) {
+        const error = new Error('잘못된 리디렉션 응답입니다.')
+        error.status = 422
+        throw error
+      }
+
+      currentUrl = new URL(location, currentUrl).toString()
+      continue
+    }
+
+    return { response, finalUrl: currentUrl }
+  }
+
+  const error = new Error('북마크 메타데이터를 불러오지 못했습니다.')
+  error.status = 422
+  throw error
+}
+
+const buildBookmarkFallbackMetadata = (normalizedUrl, domain, updatedAt) => ({
+  url: normalizedUrl,
+  normalizedUrl,
+  canonicalUrl: null,
+  domain,
+  title: domain || normalizedUrl,
+  excerpt: '미리보기를 가져오지 못했습니다.',
+  thumbnailUrl: null,
+  faviconUrl: `https://${domain}/favicon.ico`,
+  tags: [],
+  metadataStatus: 'fallback',
+  updatedAt,
+})
 
 app.get('/api/health', async (_req, res, next) => {
   try {
@@ -958,6 +1514,115 @@ app.get('/api/youtube/videos/:videoId', async (req, res, next) => {
   }
 })
 
+app.get('/api/bookmark/metadata', async (req, res, next) => {
+  try {
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url : ''
+    const normalized = normalizeBookmarkUrl(rawUrl)
+
+    if (!normalized) {
+      const error = new Error('유효한 URL(http/https)을 입력해 주세요.')
+      error.status = 400
+      throw error
+    }
+
+    const updatedAt = new Date().toISOString()
+
+    try {
+      const { response, finalUrl } = await fetchBookmarkHtmlWithRedirect(normalized.normalizedUrl)
+      if (!response.ok) {
+        res.json({
+          ok: true,
+          metadata: buildBookmarkFallbackMetadata(normalized.normalizedUrl, normalized.domain, updatedAt),
+        })
+        return
+      }
+
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+      if (!contentType.includes('text/html')) {
+        res.json({
+          ok: true,
+          metadata: buildBookmarkFallbackMetadata(normalized.normalizedUrl, normalized.domain, updatedAt),
+        })
+        return
+      }
+
+      const html = await readResponseTextWithLimit(response, bookmarkMaxResponseBytes)
+
+      const ogTitle = extractMetaContent(html, 'og:title')
+      const twitterTitle = extractMetaContent(html, 'twitter:title')
+      const pageTitle = extractTitle(html)
+
+      const ogDescription = extractMetaContent(html, 'og:description')
+      const metaDescription = extractMetaContent(html, 'description', 'twitter:description')
+      const firstParagraph = extractFirstParagraph(html)
+
+      const ogImage = extractMetaContent(html, 'og:image')
+      const twitterImage = extractMetaContent(html, 'twitter:image')
+      const ogUrl = extractMetaContent(html, 'og:url')
+      const canonicalFromLink = extractCanonicalUrl(html, finalUrl)
+
+      const resolvedUrl = normalizeBookmarkUrl(finalUrl)?.normalizedUrl || normalized.normalizedUrl
+      const resolvedDomain = new URL(resolvedUrl).hostname.replace(/^www\./, '')
+
+      const title = truncateText(ogTitle || twitterTitle || pageTitle || resolvedDomain, 120)
+      const excerpt = truncateText(
+        ogDescription || metaDescription || firstParagraph || '미리보기를 가져오지 못했습니다.',
+        220,
+      )
+
+      let thumbnailUrl = null
+      const rawImage = ogImage || twitterImage
+      if (rawImage) {
+        try {
+          thumbnailUrl = new URL(rawImage, finalUrl).toString()
+        } catch {
+          thumbnailUrl = null
+        }
+      }
+
+      let canonicalUrl = null
+      const rawCanonical = ogUrl || canonicalFromLink
+      if (rawCanonical) {
+        try {
+          canonicalUrl = normalizeBookmarkUrl(new URL(rawCanonical, finalUrl).toString())?.normalizedUrl || null
+        } catch {
+          canonicalUrl = null
+        }
+      }
+
+      const faviconUrl = `https://${resolvedDomain}/favicon.ico`
+
+      res.json({
+        ok: true,
+        metadata: {
+          url: resolvedUrl,
+          normalizedUrl: resolvedUrl,
+          canonicalUrl,
+          domain: resolvedDomain,
+          title: title || resolvedDomain,
+          excerpt: excerpt || '미리보기를 가져오지 못했습니다.',
+          thumbnailUrl,
+          faviconUrl,
+          tags: [],
+          metadataStatus: title && excerpt ? 'ok' : 'fallback',
+          updatedAt,
+        },
+      })
+    } catch (error) {
+      if (error?.status === 422) {
+        throw error
+      }
+
+      res.json({
+        ok: true,
+        metadata: buildBookmarkFallbackMetadata(normalized.normalizedUrl, normalized.domain, updatedAt),
+      })
+    }
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/github/dashboard', async (_req, res, next) => {
   try {
     const dashboard = await loadGithubDashboard()
@@ -990,6 +1655,25 @@ app.put('/api/youtube/dashboard', async (req, res, next) => {
   try {
     const dashboard = normalizeYoutubeDashboardPayload(req.body?.dashboard)
     const result = await persistYoutubeDashboard(dashboard)
+    res.json({ ok: true, ...result })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/bookmark/dashboard', async (_req, res, next) => {
+  try {
+    const dashboard = await loadBookmarkDashboard()
+    res.json({ ok: true, dashboard })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.put('/api/bookmark/dashboard', async (req, res, next) => {
+  try {
+    const dashboard = normalizeBookmarkDashboardPayload(req.body?.dashboard)
+    const result = await persistBookmarkDashboard(dashboard)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)

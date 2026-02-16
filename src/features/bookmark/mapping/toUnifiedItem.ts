@@ -1,37 +1,30 @@
-import type { UnifiedItem } from '@shared/types'
+import type { BookmarkCard, UnifiedItem } from '@shared/types'
 
-export type BookmarkDraftItem = {
-  nativeId: string
-  title: string
-  summary: string
-  description: string
-  url: string
-  tags?: string[]
-  author?: string | null
-  createdAt?: string
-  updatedAt?: string
-}
-
-export const toBookmarkUnifiedItem = (item: BookmarkDraftItem): UnifiedItem => {
-  const now = new Date().toISOString()
+export const toBookmarkUnifiedItem = (card: BookmarkCard, sortIndex: number): UnifiedItem => {
+  const normalizedUrl = card.normalizedUrl.trim()
 
   return {
-    id: `bookmark:${item.nativeId}`,
+    id: `bookmark:${normalizedUrl}`,
     provider: 'bookmark',
     type: 'bookmark',
-    nativeId: item.nativeId,
-    title: item.title,
-    summary: item.summary,
-    description: item.description,
-    url: item.url,
-    tags: item.tags ?? [],
-    author: item.author ?? null,
+    nativeId: normalizedUrl,
+    title: card.title,
+    summary: card.excerpt,
+    description: card.excerpt,
+    url: card.url,
+    tags: card.tags,
+    author: card.domain,
     language: null,
     metrics: {},
-    status: 'active',
-    createdAt: item.createdAt ?? now,
-    updatedAt: item.updatedAt ?? now,
-    savedAt: now,
-    raw: {},
+    status: card.categoryId === 'warehouse' ? 'archived' : 'active',
+    createdAt: card.addedAt,
+    updatedAt: card.updatedAt,
+    savedAt: card.addedAt,
+    raw: {
+      card,
+      categoryId: card.categoryId,
+      sortIndex,
+      metadataStatus: card.metadataStatus,
+    },
   }
 }

@@ -98,6 +98,29 @@ export type YouTubeDashboardSnapshot = {
   selectedCategoryId: CategoryId
 }
 
+export type BookmarkCard = {
+  id: string
+  categoryId: CategoryId
+  url: string
+  normalizedUrl: string
+  canonicalUrl: string | null
+  domain: string
+  title: string
+  excerpt: string
+  thumbnailUrl: string | null
+  faviconUrl: string | null
+  tags: string[]
+  addedAt: string
+  updatedAt: string
+  metadataStatus: 'ok' | 'fallback'
+}
+
+export type BookmarkDashboardSnapshot = {
+  cards: BookmarkCard[]
+  categories: Category[]
+  selectedCategoryId: CategoryId
+}
+
 export type UnifiedItem = {
   id: string
   provider: ProviderType

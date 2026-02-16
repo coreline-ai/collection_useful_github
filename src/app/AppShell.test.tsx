@@ -19,6 +19,8 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
+  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
 }))
 
 describe('AppShell', () => {
@@ -56,12 +58,13 @@ describe('AppShell', () => {
     expect(screen.getByLabelText('통합 검색어')).toHaveValue('react')
   })
 
-  it('switches non-github section to isolated placeholder', () => {
+  it('switches to bookmark board and hides github/search UI', () => {
     render(<AppShell />)
 
     fireEvent.click(screen.getByRole('tab', { name: '북마크' }))
 
-    expect(screen.getByText('북마크 기능은 준비중입니다.')).toBeInTheDocument()
+    expect(screen.getByLabelText('북마크 URL')).toBeInTheDocument()
+    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: '통합 검색어' })).not.toBeInTheDocument()
   })

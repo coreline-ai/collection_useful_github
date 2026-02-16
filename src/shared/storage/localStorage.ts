@@ -1,4 +1,7 @@
 import {
+  BOOKMARK_CARDS_STORAGE_KEY,
+  BOOKMARK_CATEGORIES_STORAGE_KEY,
+  BOOKMARK_SELECTED_CATEGORY_STORAGE_KEY,
   CARDS_STORAGE_KEY,
   CATEGORIES_STORAGE_KEY,
   DEFAULT_MAIN_CATEGORY_ID,
@@ -11,6 +14,7 @@ import {
   YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY,
 } from '../../constants'
 import type {
+  BookmarkCard,
   Category,
   CategoryId,
   GitHubRepoCard,
@@ -213,4 +217,68 @@ export const saveYoutubeSelectedCategoryId = (categoryId: CategoryId): void => {
   }
 
   window.localStorage.setItem(YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY, categoryId)
+}
+
+export const loadBookmarkCards = (): BookmarkCard[] => {
+  if (!canUseStorage()) {
+    return []
+  }
+
+  const rawCards = safeParse<Array<BookmarkCard & { categoryId?: string; normalizedUrl?: string }>>(
+    window.localStorage.getItem(BOOKMARK_CARDS_STORAGE_KEY),
+    [],
+  )
+
+  return rawCards
+    .filter((card) => Boolean(card?.id))
+    .map((card) => {
+      const normalizedUrl = card.normalizedUrl ? String(card.normalizedUrl) : String(card.id)
+      return {
+        ...card,
+        id: String(card.id),
+        normalizedUrl,
+        categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+      }
+    })
+}
+
+export const saveBookmarkCards = (cards: BookmarkCard[]): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(BOOKMARK_CARDS_STORAGE_KEY, JSON.stringify(cards))
+}
+
+export const loadBookmarkCategories = (): Category[] => {
+  if (!canUseStorage()) {
+    return []
+  }
+
+  return safeParse<Category[]>(window.localStorage.getItem(BOOKMARK_CATEGORIES_STORAGE_KEY), [])
+}
+
+export const saveBookmarkCategories = (categories: Category[]): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(BOOKMARK_CATEGORIES_STORAGE_KEY, JSON.stringify(categories))
+}
+
+export const loadBookmarkSelectedCategoryId = (): CategoryId | null => {
+  if (!canUseStorage()) {
+    return null
+  }
+
+  const value = window.localStorage.getItem(BOOKMARK_SELECTED_CATEGORY_STORAGE_KEY)
+  return value && value.trim() ? value : null
+}
+
+export const saveBookmarkSelectedCategoryId = (categoryId: CategoryId): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(BOOKMARK_SELECTED_CATEGORY_STORAGE_KEY, categoryId)
 }

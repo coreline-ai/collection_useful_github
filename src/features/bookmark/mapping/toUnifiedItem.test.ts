@@ -1,53 +1,62 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { toBookmarkUnifiedItem } from './toUnifiedItem'
 
 describe('toBookmarkUnifiedItem', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-02-16T08:30:00.000Z'))
-  })
+  it('maps bookmark card to unified item fields', () => {
+    const item = toBookmarkUnifiedItem(
+      {
+        id: 'https://example.com/post-1',
+        categoryId: 'main',
+        url: 'https://example.com/post-1',
+        normalizedUrl: 'https://example.com/post-1',
+        canonicalUrl: 'https://example.com/post-1',
+        domain: 'example.com',
+        title: 'Post title',
+        excerpt: 'Post summary',
+        thumbnailUrl: 'https://example.com/og.png',
+        faviconUrl: 'https://example.com/favicon.ico',
+        tags: ['news'],
+        addedAt: '2026-02-16T08:30:00.000Z',
+        updatedAt: '2026-02-16T08:30:00.000Z',
+        metadataStatus: 'ok',
+      },
+      3,
+    )
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-
-  it('maps bookmark draft to unified item with defaults', () => {
-    const item = toBookmarkUnifiedItem({
-      nativeId: 'post-1',
-      title: 'Post title',
-      summary: 'Post summary',
-      description: 'Post description',
-      url: 'https://example.com/post-1',
-    })
-
-    expect(item.id).toBe('bookmark:post-1')
+    expect(item.id).toBe('bookmark:https://example.com/post-1')
     expect(item.provider).toBe('bookmark')
     expect(item.type).toBe('bookmark')
-    expect(item.tags).toEqual([])
-    expect(item.author).toBeNull()
-    expect(item.metrics).toEqual({})
-    expect(item.createdAt).toBe('2026-02-16T08:30:00.000Z')
-    expect(item.updatedAt).toBe('2026-02-16T08:30:00.000Z')
-    expect(item.savedAt).toBe('2026-02-16T08:30:00.000Z')
+    expect(item.nativeId).toBe('https://example.com/post-1')
+    expect(item.title).toBe('Post title')
+    expect(item.summary).toBe('Post summary')
+    expect(item.author).toBe('example.com')
+    expect(item.status).toBe('active')
+    expect(item.raw.sortIndex).toBe(3)
+    expect(item.raw.metadataStatus).toBe('ok')
   })
 
-  it('keeps explicit timestamps when provided', () => {
-    const item = toBookmarkUnifiedItem({
-      nativeId: 'post-2',
-      title: 'Post title',
-      summary: 'Post summary',
-      description: 'Post description',
-      url: 'https://example.com/post-2',
-      tags: ['news'],
-      author: 'author',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    })
+  it('sets archived status when category is warehouse', () => {
+    const item = toBookmarkUnifiedItem(
+      {
+        id: 'https://example.com/post-2',
+        categoryId: 'warehouse',
+        url: 'https://example.com/post-2',
+        normalizedUrl: 'https://example.com/post-2',
+        canonicalUrl: null,
+        domain: 'example.com',
+        title: 'Post title',
+        excerpt: 'Post summary',
+        thumbnailUrl: null,
+        faviconUrl: null,
+        tags: [],
+        addedAt: '2026-02-16T08:30:00.000Z',
+        updatedAt: '2026-02-16T08:30:00.000Z',
+        metadataStatus: 'fallback',
+      },
+      0,
+    )
 
-    expect(item.tags).toEqual(['news'])
-    expect(item.author).toBe('author')
-    expect(item.createdAt).toBe('2026-01-01T00:00:00.000Z')
-    expect(item.updatedAt).toBe('2026-01-02T00:00:00.000Z')
-    expect(item.savedAt).toBe('2026-02-16T08:30:00.000Z')
+    expect(item.status).toBe('archived')
+    expect(item.raw.metadataStatus).toBe('fallback')
   })
 })

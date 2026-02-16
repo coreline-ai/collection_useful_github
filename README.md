@@ -55,17 +55,28 @@ GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `git
 - 상세 모달 없이 카드에서 링크로 바로 이동
 - YouTube 보드는 원격 실패 시 로컬 저장소로 degrade
 
-### 5) 수동 번역
+### 5) Bookmark 보드
+- URL 입력으로 카드 생성 (`http/https`만 허용)
+- GitHub/YouTube와 동일한 보드 플로우:
+  - 입력 2분할(URL 추가 + 등록 카드 검색)
+  - 카테고리/창고, 이동/삭제, 페이지네이션
+- 카드 레이아웃:
+  - 제목, 일부 내용(excerpt), 도메인, 링크
+  - 썸네일/파비콘(가능 시) + 메타 fallback 배지
+- 상세 모달 없이 카드에서 링크로 바로 이동
+- Bookmark 보드는 원격 실패 시 로컬 저장소로 degrade
+
+### 6) 수동 번역
 - 자동 번역 없음
 - 개요/README/Activity 각각 수동 번역 버튼 제공
 - GLM 우선, OpenAI fallback
 
-### 6) 통합검색 + 백업
+### 7) 통합검색 + 백업
 - Provider/Type 필터 포함 전역 검색
 - 검색 결과 스코어/매칭 신호(`exact/prefix/fts/trgm`) 지원
 - 백업 내보내기(JSON) / 백업 복원(JSON)
 
-### 7) 테마
+### 8) 테마
 - `light | dark` 토글
 - 저장값 없을 때 OS 다크모드 1회 감지
 - 다크 테마는 순수 블랙 기반 팔레트
@@ -87,7 +98,7 @@ GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `git
 ### Data Layer
 - PostgreSQL 단일 스키마(`unified_items`, `unified_notes`, `unified_meta`)
 - 로컬 마이그레이션으로 기존 데이터를 unified 스키마로 이관
-- GitHub/YouTube 보드는 원격 실패 시 각 탭별 로컬 저장소로 degrade
+- GitHub/YouTube/Bookmark 보드는 원격 실패 시 각 탭별 로컬 저장소로 degrade
 
 ## 통합검색 방식
 
@@ -225,9 +236,11 @@ npm run dev
 | `PGPASSWORD` | 선택 | `postgres` | DB 비밀번호 |
 | `PGDATABASE` | 선택 | `useful_git_info` | DB 이름 |
 | `PGSSL` | 선택 | `false` | SSL 사용 여부 |
-| `CORS_ORIGIN` | 선택 | `http://localhost:5173` | CORS 허용 출처 |
+| `CORS_ORIGIN` | 선택 | `http://localhost:5173,http://localhost:5174` | CORS 허용 출처 |
 | `YOUTUBE_API_KEY` | YouTube 사용 시 필수 | - | YouTube Data API v3 키 |
 | `YOUTUBE_API_TIMEOUT_SECONDS` | 선택 | `12` | YouTube API 타임아웃(초) |
+| `BOOKMARK_FETCH_TIMEOUT_MS` | 선택 | `10000` | 북마크 메타데이터 fetch 타임아웃(ms) |
+| `BOOKMARK_MAX_RESPONSE_BYTES` | 선택 | `1048576` | 북마크 메타데이터 HTML 최대 읽기 바이트 |
 
 ## 데이터 모델
 
@@ -276,6 +289,9 @@ type UnifiedItem = {
 - `youtube_cards_v1` (fallback/legacy)
 - `youtube_categories_v1` (fallback/legacy)
 - `youtube_selected_category_v1` (fallback/legacy)
+- `bookmark_cards_v1` (fallback/legacy)
+- `bookmark_categories_v1` (fallback/legacy)
+- `bookmark_selected_category_v1` (fallback/legacy)
 
 ## 프로젝트 구조
 
@@ -327,6 +343,9 @@ type UnifiedItem = {
 - `GET /api/youtube/videos/:videoId`
 - `GET /api/youtube/dashboard`
 - `PUT /api/youtube/dashboard`
+- `GET /api/bookmark/metadata?url=...`
+- `GET /api/bookmark/dashboard`
+- `PUT /api/bookmark/dashboard`
 - `PUT /api/providers/:provider/snapshot`
 - `GET /api/providers/:provider/items`
 - `GET /api/items/:id`
@@ -368,13 +387,14 @@ npm run test:e2e:postgres
 ```
 
 `test:e2e:postgres`는 전용 DB/포트(`4100` 기본)를 사용해 메인 데이터 오염을 방지합니다.
+현재 GitHub/YouTube/Bookmark 스냅샷 라운드트립 E2E를 포함합니다.
 
 ## 트러블슈팅
 
 ### 1) `대시보드 저장에 실패했습니다`
 - `VITE_POSTGRES_SYNC_API_BASE_URL` 확인
 - `server` 실행 및 `/api/health` 정상 응답 확인
-- 실패 시 GitHub feature는 로컬 저장으로 degrade됩니다.
+- 실패 시 GitHub/YouTube/Bookmark feature는 로컬 저장으로 degrade됩니다.
 
 ### 2) 통합검색 결과가 없거나 느림
 - 서버 `/api/search` 응답 확인
