@@ -17,6 +17,17 @@ const removeTrackingParams = (url: URL): void => {
   })
 }
 
+const sortQueryParams = (url: URL): void => {
+  if (!url.search || url.search.length <= 1) {
+    return
+  }
+
+  const params = new URLSearchParams(url.search)
+  params.sort()
+  const sorted = params.toString()
+  url.search = sorted ? `?${sorted}` : ''
+}
+
 export const parseBookmarkUrl = (input: string): { url: string; normalizedUrl: string; domain: string } | null => {
   const raw = input.trim()
   if (!raw) {
@@ -43,9 +54,14 @@ export const parseBookmarkUrl = (input: string): { url: string; normalizedUrl: s
     return null
   }
 
+  if (url.username || url.password) {
+    return null
+  }
+
   url.hostname = url.hostname.toLocaleLowerCase('en-US')
   url.hash = ''
   removeTrackingParams(url)
+  sortQueryParams(url)
 
   if (url.pathname.length > 1) {
     url.pathname = url.pathname.replace(/\/+$/, '')

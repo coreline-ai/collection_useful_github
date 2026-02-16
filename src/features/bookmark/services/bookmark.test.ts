@@ -28,9 +28,15 @@ describe('bookmark service', () => {
     })
   })
 
+  it('normalizes query parameter order for duplicate-safe comparison', () => {
+    const parsed = parseBookmarkUrl('https://example.com/path?b=2&a=1&utm_source=abc')
+    expect(parsed?.normalizedUrl).toBe('https://example.com/path?a=1&b=2')
+  })
+
   it('rejects invalid url', () => {
     expect(parseBookmarkUrl('')).toBeNull()
     expect(parseBookmarkUrl('file:///etc/passwd')).toBeNull()
+    expect(parseBookmarkUrl('https://user:pass@example.com/path')).toBeNull()
     expect(parseBookmarkUrl('not a url')).toBeNull()
   })
 

@@ -113,6 +113,10 @@ export const dashboardReducer = (
 ): BookmarkDashboardState => {
   switch (action.type) {
     case 'addCard': {
+      if (state.cards.some((card) => card.normalizedUrl === action.payload.normalizedUrl)) {
+        return state
+      }
+
       const insertIndex = state.cards.findIndex((card) => card.categoryId === action.payload.categoryId)
       const cards =
         insertIndex < 0

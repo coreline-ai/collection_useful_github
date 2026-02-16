@@ -83,6 +83,7 @@ export const BookmarkFeatureEntry = ({
   const [localSearchQuery, setLocalSearchQuery] = useState('')
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
+  const cardsRef = useRef(state.cards)
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -128,6 +129,10 @@ export const BookmarkFeatureEntry = ({
   const categoryNameById = useMemo(() => {
     return new Map(state.categories.map((category) => [category.id, category.name]))
   }, [state.categories])
+
+  useEffect(() => {
+    cardsRef.current = state.cards
+  }, [state.cards])
 
   useEffect(() => {
     if (!remoteEnabled) {
@@ -384,6 +389,11 @@ export const BookmarkFeatureEntry = ({
     try {
       const draft = await fetchBookmarkMetadata(parsed.normalizedUrl)
       const card = createBookmarkCardFromDraft(draft)
+
+      if (cardsRef.current.some((existingCard) => existingCard.normalizedUrl === card.normalizedUrl)) {
+        setErrorMessage('이미 추가된 북마크입니다.')
+        return false
+      }
 
       dispatch({
         type: 'addCard',

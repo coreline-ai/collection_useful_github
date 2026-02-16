@@ -1110,6 +1110,17 @@ const removeTrackingParams = (url) => {
   })
 }
 
+const sortQueryParams = (url) => {
+  if (!url.search || url.search.length <= 1) {
+    return
+  }
+
+  const params = new URLSearchParams(url.search)
+  params.sort()
+  const sorted = params.toString()
+  url.search = sorted ? `?${sorted}` : ''
+}
+
 const normalizeBookmarkUrl = (input) => {
   const raw = String(input || '').trim()
   if (!raw) {
@@ -1136,9 +1147,14 @@ const normalizeBookmarkUrl = (input) => {
     return null
   }
 
+  if (url.username || url.password) {
+    return null
+  }
+
   url.hostname = url.hostname.toLowerCase()
   url.hash = ''
   removeTrackingParams(url)
+  sortQueryParams(url)
 
   if (url.pathname.length > 1) {
     url.pathname = url.pathname.replace(/\/+$/, '')
@@ -1319,11 +1335,57 @@ const extractFirstParagraph = (html) => {
 }
 
 const readResponseTextWithLimit = async (response, maxBytes) => {
-  const text = await response.text()
-  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
-    return text.slice(0, maxBytes)
+  const contentLengthHeader = response.headers.get('content-length')
+  const parsedContentLength = contentLengthHeader ? Number(contentLengthHeader) : null
+  const hasKnownContentLength =
+    typeof parsedContentLength === 'number' && Number.isFinite(parsedContentLength) && parsedContentLength >= 0
+
+  if (contentLengthHeader) {
+    if (hasKnownContentLength && parsedContentLength > maxBytes) {
+      return { text: '', exceeded: true }
+    }
   }
-  return text
+
+  if (!response.body) {
+    if (!hasKnownContentLength || parsedContentLength > maxBytes) {
+      return { text: '', exceeded: true }
+    }
+
+    const text = await response.text()
+    const byteLength = Buffer.byteLength(text, 'utf8')
+    return {
+      text: byteLength > maxBytes ? '' : text,
+      exceeded: byteLength > maxBytes,
+    }
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const chunks = []
+  let totalBytes = 0
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value || [])
+    totalBytes += chunk.byteLength
+
+    if (totalBytes > maxBytes) {
+      await reader.cancel()
+      return { text: '', exceeded: true }
+    }
+
+    chunks.push(decoder.decode(chunk, { stream: true }))
+  }
+
+  chunks.push(decoder.decode())
+  return {
+    text: chunks.join(''),
+    exceeded: false,
+  }
 }
 
 const fetchBookmarkHtmlWithRedirect = async (targetUrl) => {
@@ -1546,7 +1608,14 @@ app.get('/api/bookmark/metadata', async (req, res, next) => {
         return
       }
 
-      const html = await readResponseTextWithLimit(response, bookmarkMaxResponseBytes)
+      const { text: html, exceeded } = await readResponseTextWithLimit(response, bookmarkMaxResponseBytes)
+      if (exceeded) {
+        res.json({
+          ok: true,
+          metadata: buildBookmarkFallbackMetadata(normalized.normalizedUrl, normalized.domain, updatedAt),
+        })
+        return
+      }
 
       const ogTitle = extractMetaContent(html, 'og:title')
       const twitterTitle = extractMetaContent(html, 'twitter:title')
@@ -1563,6 +1632,11 @@ app.get('/api/bookmark/metadata', async (req, res, next) => {
 
       const resolvedUrl = normalizeBookmarkUrl(finalUrl)?.normalizedUrl || normalized.normalizedUrl
       const resolvedDomain = new URL(resolvedUrl).hostname.replace(/^www\./, '')
+
+      const hasStructuredTitle = Boolean(ogTitle || twitterTitle)
+      const hasStructuredExcerpt = Boolean(ogDescription || metaDescription)
+      const hasRichFallbackContent = Boolean(pageTitle && firstParagraph)
+      const hasReliableMetadata = hasStructuredTitle || hasStructuredExcerpt || hasRichFallbackContent
 
       const title = truncateText(ogTitle || twitterTitle || pageTitle || resolvedDomain, 120)
       const excerpt = truncateText(
@@ -1604,7 +1678,7 @@ app.get('/api/bookmark/metadata', async (req, res, next) => {
           thumbnailUrl,
           faviconUrl,
           tags: [],
-          metadataStatus: title && excerpt ? 'ok' : 'fallback',
+          metadataStatus: hasReliableMetadata ? 'ok' : 'fallback',
           updatedAt,
         },
       })

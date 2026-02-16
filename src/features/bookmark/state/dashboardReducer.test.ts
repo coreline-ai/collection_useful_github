@@ -34,6 +34,18 @@ describe('bookmark dashboardReducer', () => {
     expect(next.selectedCategoryId).toBe('main')
   })
 
+  it('ignores duplicate normalizedUrl on add', () => {
+    const state = initialState()
+    const first = dashboardReducer(state, { type: 'addCard', payload: baseCard() })
+    const duplicate = dashboardReducer(first, {
+      type: 'addCard',
+      payload: baseCard({ title: 'Duplicate title' }),
+    })
+
+    expect(duplicate.cards).toHaveLength(1)
+    expect(duplicate.cards[0].title).toBe('Example')
+  })
+
   it('moves card to target category', () => {
     let state = initialState()
     state = dashboardReducer(state, { type: 'addCard', payload: baseCard() })
