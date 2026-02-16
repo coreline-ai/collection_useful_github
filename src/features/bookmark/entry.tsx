@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   isRemoteSnapshotEnabled,
   loadBookmarkDashboardFromRemote,
@@ -11,6 +11,7 @@ import {
   REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK,
   REMOTE_SYNC_RECOVERED_BADGE_MS,
   REMOTE_SYNC_RECOVERY_INTERVAL_MS,
+  REMOTE_SYNC_SAVE_DEBOUNCE_MS,
 } from '@constants'
 import { CategorySettingsModal } from '@features/github/ui/CategorySettingsModal'
 import { Pagination } from '@features/github/ui/Pagination'
@@ -28,7 +29,14 @@ import {
   saveBookmarkCategories,
   saveBookmarkSelectedCategoryId,
 } from '@shared/storage/localStorage'
-import type { BookmarkCard as BookmarkCardItem, Category, CategoryId, SyncConnectionStatus, ThemeMode } from '@shared/types'
+import type {
+  BookmarkCard as BookmarkCardItem,
+  BookmarkDashboardSnapshot,
+  Category,
+  CategoryId,
+  SyncConnectionStatus,
+  ThemeMode,
+} from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { isRemoteSyncConnectionWarning, isTransientRemoteSyncError } from '@utils/remoteSync'
 
@@ -37,6 +45,8 @@ type BookmarkFeatureEntryProps = {
   onToggleTheme: () => void
   onSyncStatusChange?: (payload: { status: SyncConnectionStatus; lastSuccessAt: string | null }) => void
 }
+
+type BookmarkSavePayload = Pick<BookmarkDashboardSnapshot, 'cards' | 'categories' | 'selectedCategoryId'>
 
 const createCategoryId = (): string => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -209,6 +219,10 @@ export const BookmarkFeatureEntry = ({
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const cardsRef = useRef(state.cards)
+  const remoteRevisionRef = useRef<number | null>(null)
+  const saveDebounceTimeoutRef = useRef<number | null>(null)
+  const saveInFlightRef = useRef(false)
+  const pendingRemotePayloadRef = useRef<BookmarkSavePayload | null>(null)
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -257,6 +271,110 @@ export const BookmarkFeatureEntry = ({
 
   const duplicateGroups = useMemo(() => findDuplicateGroups(state.cards), [state.cards])
 
+  const persistLocalSnapshot = useCallback((payload: BookmarkSavePayload) => {
+    saveBookmarkCards(payload.cards)
+    saveBookmarkCategories(payload.categories)
+    saveBookmarkSelectedCategoryId(payload.selectedCategoryId)
+  }, [])
+
+  const flushRemoteSaveQueue = useCallback(async () => {
+    if (saveInFlightRef.current || !pendingRemotePayloadRef.current) {
+      return
+    }
+
+    saveInFlightRef.current = true
+
+    try {
+      while (pendingRemotePayloadRef.current) {
+        const payload = pendingRemotePayloadRef.current
+        pendingRemotePayloadRef.current = null
+
+        try {
+          const nextRevision = await saveBookmarkDashboardToRemote(payload, remoteRevisionRef.current)
+          if (typeof nextRevision === 'number') {
+            remoteRevisionRef.current = nextRevision
+          }
+
+          if (transientRemoteSaveFailuresRef.current > 0) {
+            transientRemoteSaveFailuresRef.current = 0
+            setSyncStatus('recovered')
+            setLastSyncSuccessAt(new Date().toISOString())
+            setErrorMessage((previous) =>
+              previous?.startsWith('원격 저장 연결이 불안정합니다.') ? null : previous,
+            )
+            continue
+          }
+
+          if (!remoteSyncDegraded) {
+            setSyncStatus('healthy')
+            setLastSyncSuccessAt(new Date().toISOString())
+          }
+        } catch (error) {
+          persistLocalSnapshot(payload)
+
+          const statusValue =
+            error && typeof error === 'object' ? (error as { status?: unknown }).status : undefined
+          const statusCode = typeof statusValue === 'number' ? Number(statusValue) : null
+
+          if (statusCode === 409) {
+            transientRemoteSaveFailuresRef.current = 0
+            remoteRevisionRef.current = null
+            pendingRemotePayloadRef.current = null
+            setHasRemoteBaseline(false)
+            setRemoteSyncDegraded(true)
+            setSyncStatus('retrying')
+            setErrorMessage('원격 대시보드 버전 충돌이 발생해 다시 동기화 중입니다.')
+            break
+          }
+
+          const transientError = isTransientRemoteSyncError(error)
+
+          if (transientError) {
+            transientRemoteSaveFailuresRef.current += 1
+            if (transientRemoteSaveFailuresRef.current < REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK) {
+              setSyncStatus('retrying')
+              setErrorMessage(
+                `원격 저장 연결이 불안정합니다. 자동 재시도 중입니다. (${transientRemoteSaveFailuresRef.current}/${REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK})`,
+              )
+              continue
+            }
+          }
+
+          transientRemoteSaveFailuresRef.current = 0
+          pendingRemotePayloadRef.current = null
+          setRemoteSyncDegraded(true)
+          setSyncStatus('local')
+          setErrorMessage(
+            transientError
+              ? '원격 저장 연결이 계속 실패해 로컬 저장으로 전환했습니다. 서버 실행/네트워크/CORS 설정을 확인해 주세요.'
+              : error instanceof Error
+                ? `${error.message} 로컬 저장으로 전환했습니다.`
+                : '원격 북마크 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.',
+          )
+          break
+        }
+      }
+    } finally {
+      saveInFlightRef.current = false
+      if (pendingRemotePayloadRef.current) {
+        void flushRemoteSaveQueue()
+      }
+    }
+  }, [persistLocalSnapshot, remoteSyncDegraded])
+
+  const enqueueRemoteSave = useCallback((payload: BookmarkSavePayload) => {
+    pendingRemotePayloadRef.current = payload
+
+    if (saveDebounceTimeoutRef.current !== null) {
+      window.clearTimeout(saveDebounceTimeoutRef.current)
+    }
+
+    saveDebounceTimeoutRef.current = window.setTimeout(() => {
+      saveDebounceTimeoutRef.current = null
+      void flushRemoteSaveQueue()
+    }, REMOTE_SYNC_SAVE_DEBOUNCE_MS)
+  }, [flushRemoteSaveQueue])
+
   useEffect(() => {
     cardsRef.current = state.cards
   }, [state.cards])
@@ -299,6 +417,10 @@ export const BookmarkFeatureEntry = ({
         }
 
         if (!cancelled && remoteDashboard) {
+          remoteRevisionRef.current =
+            typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
+              ? remoteDashboard.revision
+              : null
           dispatch({
             type: 'hydrateDashboard',
             payload: remoteDashboard,
@@ -307,6 +429,7 @@ export const BookmarkFeatureEntry = ({
         }
       } catch (error) {
         if (!cancelled) {
+          remoteRevisionRef.current = null
           setErrorMessage(error instanceof Error ? error.message : '원격 북마크 대시보드 로딩에 실패했습니다.')
           setRemoteSyncDegraded(true)
           setSyncStatus('local')
@@ -338,67 +461,34 @@ export const BookmarkFeatureEntry = ({
         selectedCategoryId: state.selectedCategoryId,
       }
 
-      void saveBookmarkDashboardToRemote(payload)
-        .then(() => {
-          if (transientRemoteSaveFailuresRef.current > 0) {
-            transientRemoteSaveFailuresRef.current = 0
-            setSyncStatus('recovered')
-            setLastSyncSuccessAt(new Date().toISOString())
-            setErrorMessage((previous) =>
-              previous?.startsWith('원격 저장 연결이 불안정합니다.') ? null : previous,
-            )
-            return
-          }
-
-          if (!remoteSyncDegraded) {
-            setSyncStatus('healthy')
-            setLastSyncSuccessAt(new Date().toISOString())
-          }
-        })
-        .catch((error) => {
-          saveBookmarkCards(state.cards)
-          saveBookmarkCategories(state.categories)
-          saveBookmarkSelectedCategoryId(state.selectedCategoryId)
-
-          const transientError = isTransientRemoteSyncError(error)
-
-          if (transientError) {
-            transientRemoteSaveFailuresRef.current += 1
-            if (transientRemoteSaveFailuresRef.current < REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK) {
-              setSyncStatus('retrying')
-              setErrorMessage(
-                `원격 저장 연결이 불안정합니다. 자동 재시도 중입니다. (${transientRemoteSaveFailuresRef.current}/${REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK})`,
-              )
-              return
-            }
-          }
-
-          transientRemoteSaveFailuresRef.current = 0
-          setRemoteSyncDegraded(true)
-          setSyncStatus('local')
-          setErrorMessage(
-            transientError
-              ? '원격 저장 연결이 계속 실패해 로컬 저장으로 전환했습니다. 서버 실행/네트워크/CORS 설정을 확인해 주세요.'
-              : error instanceof Error
-                ? `${error.message} 로컬 저장으로 전환했습니다.`
-                : '원격 북마크 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.',
-          )
-        })
+      enqueueRemoteSave(payload)
       return
     }
 
-    saveBookmarkCards(state.cards)
-    saveBookmarkCategories(state.categories)
-    saveBookmarkSelectedCategoryId(state.selectedCategoryId)
+    persistLocalSnapshot({
+      cards: state.cards,
+      categories: state.categories,
+      selectedCategoryId: state.selectedCategoryId,
+    })
   }, [
+    enqueueRemoteSave,
     hasLoadedRemote,
     hasRemoteBaseline,
+    persistLocalSnapshot,
     remoteEnabled,
     remoteSyncDegraded,
     state.cards,
     state.categories,
     state.selectedCategoryId,
   ])
+
+  useEffect(() => {
+    return () => {
+      if (saveDebounceTimeoutRef.current !== null) {
+        window.clearTimeout(saveDebounceTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!remoteEnabled || !remoteSyncDegraded || !hasLoadedRemote) {
@@ -423,6 +513,10 @@ export const BookmarkFeatureEntry = ({
           }
 
           if (remoteDashboard) {
+            remoteRevisionRef.current =
+              typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
+                ? remoteDashboard.revision
+                : null
             dispatch({
               type: 'hydrateDashboard',
               payload: remoteDashboard,
@@ -437,13 +531,19 @@ export const BookmarkFeatureEntry = ({
           return
         }
 
-        await saveBookmarkDashboardToRemote({
-          cards: state.cards,
-          categories: state.categories,
-          selectedCategoryId: state.selectedCategoryId,
-        })
+        const nextRevision = await saveBookmarkDashboardToRemote(
+          {
+            cards: state.cards,
+            categories: state.categories,
+            selectedCategoryId: state.selectedCategoryId,
+          },
+          remoteRevisionRef.current,
+        )
 
         if (!cancelled) {
+          if (typeof nextRevision === 'number') {
+            remoteRevisionRef.current = nextRevision
+          }
           transientRemoteSaveFailuresRef.current = 0
           setRemoteSyncDegraded(false)
           setSyncStatus('recovered')

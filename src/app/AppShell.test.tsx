@@ -16,11 +16,11 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   exportUnifiedBackup: vi.fn(),
   importUnifiedBackup: vi.fn(),
   loadGithubDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveGithubDashboardToRemote: vi.fn().mockResolvedValue(null),
   loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(null),
   loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(null),
   checkBookmarkLinkStatus: vi.fn(),
 }))
 

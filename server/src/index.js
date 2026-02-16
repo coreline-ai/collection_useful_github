@@ -14,6 +14,7 @@ const DASHBOARD_META_KEY = 'github_dashboard_v1'
 const YOUTUBE_DASHBOARD_META_KEY = 'youtube_dashboard_v1'
 const BOOKMARK_DASHBOARD_META_KEY = 'bookmark_dashboard_v1'
 const youtubeApiKey = (process.env.YOUTUBE_API_KEY || '').trim()
+const adminApiToken = (process.env.ADMIN_API_TOKEN || '').trim()
 const youtubeTimeoutSeconds = Number(process.env.YOUTUBE_API_TIMEOUT_SECONDS || 12)
 const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeoutSeconds > 0
   ? Math.floor(youtubeTimeoutSeconds * 1000)
@@ -66,6 +67,63 @@ app.use((req, _res, next) => {
 const searchRateLimitMap = new Map()
 const SEARCH_LIMIT_WINDOW_MS = 60 * 1000
 const SEARCH_LIMIT_MAX = 60
+
+const createHttpError = (status, message) => {
+  const error = new Error(message)
+  error.status = status
+  return error
+}
+
+const parseExpectedRevision = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null
+  }
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw createHttpError(400, 'invalid expectedRevision')
+  }
+
+  return parsed
+}
+
+const parseMetaRevision = (value) => {
+  const revision = Number(value?.revision)
+  if (!Number.isInteger(revision) || revision < 0) {
+    return 0
+  }
+
+  return revision
+}
+
+const resolveRequestToken = (req) => {
+  const headerToken = String(req.get('x-admin-token') || '').trim()
+  if (headerToken) {
+    return headerToken
+  }
+
+  const authorization = String(req.get('authorization') || '').trim()
+  if (authorization.toLowerCase().startsWith('bearer ')) {
+    return authorization.slice(7).trim()
+  }
+
+  return ''
+}
+
+const requireAdminAuth = (req, _res, next) => {
+  if (!adminApiToken) {
+    next()
+    return
+  }
+
+  const token = resolveRequestToken(req)
+  if (!token || token !== adminApiToken) {
+    next(createHttpError(401, 'unauthorized'))
+    return
+  }
+
+  next()
+}
 
 const parseBoolean = (value, fallback = false) => {
   if (typeof value !== 'string') {
@@ -715,16 +773,18 @@ const loadGithubDashboard = async () => {
   const selectedCategoryId = categories.some((category) => category.id === metaValue?.selectedCategoryId)
     ? metaValue.selectedCategoryId
     : 'main'
+  const revision = parseMetaRevision(metaValue)
 
   return {
     cards,
     notesByRepo,
     categories,
     selectedCategoryId,
+    revision,
   }
 }
 
-const persistGithubDashboard = async (dashboard) => {
+const persistGithubDashboard = async (dashboard, expectedRevision = null) => {
   const normalized = normalizeDashboardPayload(dashboard)
   const items = toGithubUnifiedItems(normalized.cards)
   const itemIds = new Set(items.map((item) => item.id))
@@ -734,6 +794,22 @@ const persistGithubDashboard = async (dashboard) => {
 
   try {
     await client.query('BEGIN')
+
+    const revisionResult = await client.query(
+      `
+        SELECT value
+        FROM unified_meta
+        WHERE key = $1
+        FOR UPDATE
+      `,
+      [DASHBOARD_META_KEY],
+    )
+    const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+
+    if (expectedRevision !== null && expectedRevision !== currentRevision) {
+      throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
+    }
+    const nextRevision = currentRevision + 1
 
     await client.query('DELETE FROM unified_items WHERE provider = $1', ['github'])
 
@@ -793,6 +869,7 @@ const persistGithubDashboard = async (dashboard) => {
         JSON.stringify({
           categories: normalized.categories,
           selectedCategoryId: normalized.selectedCategoryId,
+          revision: nextRevision,
           updatedAt: new Date().toISOString(),
         }),
       ],
@@ -814,6 +891,7 @@ const persistGithubDashboard = async (dashboard) => {
       items: items.length,
       notes: notes.length,
       categories: normalized.categories.length,
+      revision: nextRevision,
     }
   } catch (error) {
     await client.query('ROLLBACK')
@@ -866,15 +944,17 @@ const loadYoutubeDashboard = async () => {
   const selectedCategoryId = categories.some((category) => category.id === metaValue?.selectedCategoryId)
     ? metaValue.selectedCategoryId
     : 'main'
+  const revision = parseMetaRevision(metaValue)
 
   return {
     cards,
     categories,
     selectedCategoryId,
+    revision,
   }
 }
 
-const persistYoutubeDashboard = async (dashboard) => {
+const persistYoutubeDashboard = async (dashboard, expectedRevision = null) => {
   const normalized = normalizeYoutubeDashboardPayload(dashboard)
   const items = toYoutubeUnifiedItems(normalized.cards)
 
@@ -882,6 +962,22 @@ const persistYoutubeDashboard = async (dashboard) => {
 
   try {
     await client.query('BEGIN')
+
+    const revisionResult = await client.query(
+      `
+        SELECT value
+        FROM unified_meta
+        WHERE key = $1
+        FOR UPDATE
+      `,
+      [YOUTUBE_DASHBOARD_META_KEY],
+    )
+    const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+
+    if (expectedRevision !== null && expectedRevision !== currentRevision) {
+      throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
+    }
+    const nextRevision = currentRevision + 1
 
     await client.query('DELETE FROM unified_items WHERE provider = $1', ['youtube'])
 
@@ -929,6 +1025,7 @@ const persistYoutubeDashboard = async (dashboard) => {
         JSON.stringify({
           categories: normalized.categories,
           selectedCategoryId: normalized.selectedCategoryId,
+          revision: nextRevision,
           updatedAt: new Date().toISOString(),
         }),
       ],
@@ -949,6 +1046,7 @@ const persistYoutubeDashboard = async (dashboard) => {
     return {
       items: items.length,
       categories: normalized.categories.length,
+      revision: nextRevision,
     }
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1001,15 +1099,17 @@ const loadBookmarkDashboard = async () => {
   const selectedCategoryId = categories.some((category) => category.id === metaValue?.selectedCategoryId)
     ? metaValue.selectedCategoryId
     : 'main'
+  const revision = parseMetaRevision(metaValue)
 
   return {
     cards,
     categories,
     selectedCategoryId,
+    revision,
   }
 }
 
-const persistBookmarkDashboard = async (dashboard) => {
+const persistBookmarkDashboard = async (dashboard, expectedRevision = null) => {
   const normalized = normalizeBookmarkDashboardPayload(dashboard)
   const items = toBookmarkUnifiedItems(normalized.cards)
 
@@ -1017,6 +1117,22 @@ const persistBookmarkDashboard = async (dashboard) => {
 
   try {
     await client.query('BEGIN')
+
+    const revisionResult = await client.query(
+      `
+        SELECT value
+        FROM unified_meta
+        WHERE key = $1
+        FOR UPDATE
+      `,
+      [BOOKMARK_DASHBOARD_META_KEY],
+    )
+    const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+
+    if (expectedRevision !== null && expectedRevision !== currentRevision) {
+      throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
+    }
+    const nextRevision = currentRevision + 1
 
     await client.query('DELETE FROM unified_items WHERE provider = $1', ['bookmark'])
 
@@ -1064,6 +1180,7 @@ const persistBookmarkDashboard = async (dashboard) => {
         JSON.stringify({
           categories: normalized.categories,
           selectedCategoryId: normalized.selectedCategoryId,
+          revision: nextRevision,
           updatedAt: new Date().toISOString(),
         }),
       ],
@@ -1084,6 +1201,7 @@ const persistBookmarkDashboard = async (dashboard) => {
     return {
       items: items.length,
       categories: normalized.categories.length,
+      revision: nextRevision,
     }
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1869,10 +1987,11 @@ app.get('/api/github/dashboard', async (_req, res, next) => {
   }
 })
 
-app.put('/api/github/dashboard', async (req, res, next) => {
+app.put('/api/github/dashboard', requireAdminAuth, async (req, res, next) => {
   try {
     const dashboard = normalizeDashboardPayload(req.body?.dashboard)
-    const result = await persistGithubDashboard(dashboard)
+    const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
+    const result = await persistGithubDashboard(dashboard, expectedRevision)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)
@@ -1888,10 +2007,11 @@ app.get('/api/youtube/dashboard', async (_req, res, next) => {
   }
 })
 
-app.put('/api/youtube/dashboard', async (req, res, next) => {
+app.put('/api/youtube/dashboard', requireAdminAuth, async (req, res, next) => {
   try {
     const dashboard = normalizeYoutubeDashboardPayload(req.body?.dashboard)
-    const result = await persistYoutubeDashboard(dashboard)
+    const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
+    const result = await persistYoutubeDashboard(dashboard, expectedRevision)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)
@@ -1907,17 +2027,18 @@ app.get('/api/bookmark/dashboard', async (_req, res, next) => {
   }
 })
 
-app.put('/api/bookmark/dashboard', async (req, res, next) => {
+app.put('/api/bookmark/dashboard', requireAdminAuth, async (req, res, next) => {
   try {
     const dashboard = normalizeBookmarkDashboardPayload(req.body?.dashboard)
-    const result = await persistBookmarkDashboard(dashboard)
+    const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
+    const result = await persistBookmarkDashboard(dashboard, expectedRevision)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)
   }
 })
 
-app.put('/api/providers/:provider/snapshot', async (req, res, next) => {
+app.put('/api/providers/:provider/snapshot', requireAdminAuth, async (req, res, next) => {
   const { provider } = req.params
 
   try {
@@ -1925,7 +2046,8 @@ app.put('/api/providers/:provider/snapshot', async (req, res, next) => {
 
     if (provider === 'github' && req.body?.dashboard) {
       const dashboard = normalizeDashboardPayload(req.body.dashboard)
-      const result = await persistGithubDashboard(dashboard)
+      const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
+      const result = await persistGithubDashboard(dashboard, expectedRevision)
       res.json({ ok: true, provider, ...result })
       return
     }
@@ -2356,7 +2478,7 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
   }
 })
 
-app.get('/api/admin/export', async (_req, res, next) => {
+app.get('/api/admin/export', requireAdminAuth, async (_req, res, next) => {
   try {
     const [items, notes, meta] = await Promise.all([
       query(
@@ -2413,7 +2535,7 @@ app.get('/api/admin/export', async (_req, res, next) => {
   }
 })
 
-app.post('/api/admin/import', async (req, res, next) => {
+app.post('/api/admin/import', requireAdminAuth, async (req, res, next) => {
   try {
     const payload = req.body
 

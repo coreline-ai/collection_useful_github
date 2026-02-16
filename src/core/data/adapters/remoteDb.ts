@@ -65,6 +65,10 @@ type ProviderNotesPayload = ApiResponse<{
   notes: Array<{ id: string; itemId: string; content: string; createdAt: string }>
 }>
 
+type SaveDashboardResponse = {
+  revision: number
+}
+
 const getRemoteBaseUrl = (): string | null => {
   const value = (import.meta.env.VITE_POSTGRES_SYNC_API_BASE_URL as string | undefined)?.trim()
 
@@ -77,10 +81,23 @@ const getRemoteBaseUrl = (): string | null => {
 
 export const isRemoteSnapshotEnabled = (): boolean => Boolean(getRemoteBaseUrl())
 
+const getRemoteApiToken = (): string => {
+  const token = (import.meta.env.VITE_POSTGRES_SYNC_API_TOKEN as string | undefined)?.trim()
+  return token || ''
+}
+
+const getRemoteRequestTimeoutMs = (): number => {
+  const raw = Number(import.meta.env.VITE_POSTGRES_SYNC_TIMEOUT_SECONDS as string | undefined)
+  const seconds = Number.isFinite(raw) && raw > 0 ? raw : 12
+  return Math.floor(seconds * 1000)
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const requestWithRetry = async (path: string, init?: RequestInit, retries = 2): Promise<Response> => {
   const baseUrl = getRemoteBaseUrl()
+  const apiToken = getRemoteApiToken()
+  const timeoutMs = getRemoteRequestTimeoutMs()
 
   if (!baseUrl) {
     throw new Error('원격 DB API가 설정되지 않았습니다.')
@@ -90,7 +107,33 @@ const requestWithRetry = async (path: string, init?: RequestInit, retries = 2): 
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      const response = await fetch(`${baseUrl}${path}`, init)
+      const headers = new Headers(init?.headers)
+      if (apiToken) {
+        headers.set('x-admin-token', apiToken)
+      }
+
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+      const originalSignal = init?.signal
+      const abortFromOriginal = () => controller.abort()
+      if (originalSignal) {
+        if (originalSignal.aborted) {
+          controller.abort()
+        } else {
+          originalSignal.addEventListener('abort', abortFromOriginal, { once: true })
+        }
+      }
+
+      const response = await fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+      }).finally(() => {
+        clearTimeout(timeoutId)
+        if (originalSignal) {
+          originalSignal.removeEventListener('abort', abortFromOriginal)
+        }
+      })
 
       if (response.status >= 500 && attempt < retries) {
         await wait(200 * (attempt + 1))
@@ -99,7 +142,11 @@ const requestWithRetry = async (path: string, init?: RequestInit, retries = 2): 
 
       return response
     } catch (error) {
-      lastError = error
+      const isAbortError =
+        error instanceof DOMException
+          ? error.name === 'AbortError'
+          : error instanceof Error && error.name === 'AbortError'
+      lastError = isAbortError ? new Error('원격 API 요청 timeout') : error
 
       if (attempt < retries) {
         await wait(200 * (attempt + 1))
@@ -118,6 +165,12 @@ const parseErrorMessage = async (response: Response, fallback: string): Promise<
   } catch {
     return fallback
   }
+}
+
+const createResponseError = async (response: Response, fallback: string): Promise<Error & { status: number }> => {
+  const error = new Error(await parseErrorMessage(response, fallback)) as Error & { status: number }
+  error.status = response.status
+  return error
 }
 
 const toIso = (value: unknown): string => {
@@ -667,9 +720,12 @@ export const loadGithubDashboardFromRemote = async (): Promise<GitHubDashboardSn
   return payload.dashboard
 }
 
-export const saveGithubDashboardToRemote = async (dashboard: GitHubDashboardSnapshot): Promise<void> => {
+export const saveGithubDashboardToRemote = async (
+  dashboard: GitHubDashboardSnapshot,
+  expectedRevision: number | null = null,
+): Promise<number | null> => {
   if (!isRemoteSnapshotEnabled()) {
-    return
+    return null
   }
 
   const response = await requestWithRetry('/api/github/dashboard', {
@@ -677,17 +733,20 @@ export const saveGithubDashboardToRemote = async (dashboard: GitHubDashboardSnap
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ dashboard }),
+    body: JSON.stringify({ dashboard, expectedRevision }),
   })
 
   if (response.status === 404) {
     await saveGithubDashboardToLegacyApi(dashboard)
-    return
+    return null
   }
 
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, '대시보드 저장에 실패했습니다.'))
+    throw await createResponseError(response, '대시보드 저장에 실패했습니다.')
   }
+
+  const payload = (await response.json()) as ApiResponse<SaveDashboardResponse>
+  return typeof payload.revision === 'number' && Number.isFinite(payload.revision) ? payload.revision : null
 }
 
 export const loadYoutubeDashboardFromRemote = async (): Promise<YouTubeDashboardSnapshot | null> => {
@@ -714,9 +773,12 @@ export const loadYoutubeDashboardFromRemote = async (): Promise<YouTubeDashboard
   return payload.dashboard
 }
 
-export const saveYoutubeDashboardToRemote = async (dashboard: YouTubeDashboardSnapshot): Promise<void> => {
+export const saveYoutubeDashboardToRemote = async (
+  dashboard: YouTubeDashboardSnapshot,
+  expectedRevision: number | null = null,
+): Promise<number | null> => {
   if (!isRemoteSnapshotEnabled()) {
-    return
+    return null
   }
 
   const response = await requestWithRetry('/api/youtube/dashboard', {
@@ -724,17 +786,20 @@ export const saveYoutubeDashboardToRemote = async (dashboard: YouTubeDashboardSn
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ dashboard }),
+    body: JSON.stringify({ dashboard, expectedRevision }),
   })
 
   if (response.status === 404) {
     await saveYoutubeDashboardToLegacyApi(dashboard)
-    return
+    return null
   }
 
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, '유튜브 대시보드 저장에 실패했습니다.'))
+    throw await createResponseError(response, '유튜브 대시보드 저장에 실패했습니다.')
   }
+
+  const payload = (await response.json()) as ApiResponse<SaveDashboardResponse>
+  return typeof payload.revision === 'number' && Number.isFinite(payload.revision) ? payload.revision : null
 }
 
 export const loadBookmarkDashboardFromRemote = async (): Promise<BookmarkDashboardSnapshot | null> => {
@@ -761,9 +826,12 @@ export const loadBookmarkDashboardFromRemote = async (): Promise<BookmarkDashboa
   return payload.dashboard
 }
 
-export const saveBookmarkDashboardToRemote = async (dashboard: BookmarkDashboardSnapshot): Promise<void> => {
+export const saveBookmarkDashboardToRemote = async (
+  dashboard: BookmarkDashboardSnapshot,
+  expectedRevision: number | null = null,
+): Promise<number | null> => {
   if (!isRemoteSnapshotEnabled()) {
-    return
+    return null
   }
 
   const response = await requestWithRetry('/api/bookmark/dashboard', {
@@ -771,17 +839,20 @@ export const saveBookmarkDashboardToRemote = async (dashboard: BookmarkDashboard
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ dashboard }),
+    body: JSON.stringify({ dashboard, expectedRevision }),
   })
 
   if (response.status === 404) {
     await saveBookmarkDashboardToLegacyApi(dashboard)
-    return
+    return null
   }
 
   if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, '북마크 대시보드 저장에 실패했습니다.'))
+    throw await createResponseError(response, '북마크 대시보드 저장에 실패했습니다.')
   }
+
+  const payload = (await response.json()) as ApiResponse<SaveDashboardResponse>
+  return typeof payload.revision === 'number' && Number.isFinite(payload.revision) ? payload.revision : null
 }
 
 export const fetchBookmarkMetadata = async (url: string): Promise<BookmarkCardDraft> => {

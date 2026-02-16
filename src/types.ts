@@ -74,6 +74,7 @@ export type GitHubDashboardSnapshot = {
   notesByRepo: NotesByRepo
   categories: Category[]
   selectedCategoryId: CategoryId
+  revision?: number
 }
 
 export type YouTubeVideoCard = {
@@ -96,6 +97,7 @@ export type YouTubeDashboardSnapshot = {
   cards: YouTubeVideoCard[]
   categories: Category[]
   selectedCategoryId: CategoryId
+  revision?: number
 }
 
 export type BookmarkLinkStatus =
@@ -132,6 +134,7 @@ export type BookmarkDashboardSnapshot = {
   cards: BookmarkCard[]
   categories: Category[]
   selectedCategoryId: CategoryId
+  revision?: number
 }
 
 export type UnifiedItem = {

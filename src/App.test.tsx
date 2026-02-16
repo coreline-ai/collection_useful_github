@@ -41,11 +41,11 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   isRemoteSnapshotEnabled: vi.fn(() => false),
   getRemoteBaseUrl: vi.fn(() => null),
   loadGithubDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveGithubDashboardToRemote: vi.fn().mockResolvedValue(null),
   loadYoutubeDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(null),
   loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
-  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(null),
   checkBookmarkLinkStatus: vi.fn(),
   searchUnifiedItems: vi.fn().mockResolvedValue([]),
   exportUnifiedBackup: vi.fn().mockResolvedValue({
@@ -171,9 +171,9 @@ describe('App', () => {
     mockMatchMedia(false)
     vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(false)
     vi.mocked(loadGithubDashboardFromRemote).mockResolvedValue(null)
-    vi.mocked(saveGithubDashboardToRemote).mockResolvedValue(undefined)
+    vi.mocked(saveGithubDashboardToRemote).mockResolvedValue(null)
     vi.mocked(loadYoutubeDashboardFromRemote).mockResolvedValue(null)
-    vi.mocked(saveYoutubeDashboardToRemote).mockResolvedValue(undefined)
+    vi.mocked(saveYoutubeDashboardToRemote).mockResolvedValue(null)
     vi.mocked(fetchRepoDetail).mockResolvedValue(mockDetail)
     vi.mocked(fetchLatestCommitSha).mockResolvedValue('abc123')
     vi.mocked(parseYouTubeVideoUrl).mockImplementation((input: string) =>
@@ -271,7 +271,7 @@ describe('App', () => {
     vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
     vi.mocked(saveYoutubeDashboardToRemote)
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
-      .mockResolvedValue(undefined)
+      .mockResolvedValue(null)
 
     render(<App />)
 
