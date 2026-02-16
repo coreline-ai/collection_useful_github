@@ -54,6 +54,46 @@ type GitHubIssueResponse = {
   }
 }
 
+type GitHubSearchRepoItemResponse = {
+  full_name: string
+  owner: { login: string }
+  name: string
+  description: string | null
+  html_url: string
+  language: string | null
+  stargazers_count: number
+  forks_count: number
+  updated_at: string
+  topics?: string[]
+}
+
+type GitHubSearchResponse = {
+  total_count: number
+  items: GitHubSearchRepoItemResponse[]
+}
+
+export type GitHubRepoSearchItem = {
+  id: string
+  owner: string
+  repo: string
+  fullName: string
+  description: string
+  htmlUrl: string
+  language: string | null
+  stars: number
+  forks: number
+  topics: string[]
+  updatedAt: string
+}
+
+export type GitHubRepoSearchPage = {
+  items: GitHubRepoSearchItem[]
+  totalCount: number
+  page: number
+  perPage: number
+  hasNextPage: boolean
+}
+
 export class GitHubApiError extends Error {
   status: number
 
@@ -103,6 +143,12 @@ const buildErrorMessage = async (response: Response): Promise<string> => {
     }
 
     return '이 저장소 정보에 접근할 수 없습니다.'
+  }
+
+  if (response.status === 422) {
+    return payload.message
+      ? `검색어가 유효하지 않습니다. ${payload.message}`
+      : '검색어가 유효하지 않습니다. 2자 이상의 검색어를 입력해 주세요.'
   }
 
   if (!navigator.onLine) {
@@ -319,5 +365,56 @@ export const fetchRepoDetail = async (owner: string, repo: string): Promise<Repo
     readmePreview: readmePreviewText,
     recentActivity: recentActivityRaw,
     latestCommitSha,
+  }
+}
+
+export const searchPublicRepos = async (
+  query: string,
+  page: number,
+  perPage = 12,
+): Promise<GitHubRepoSearchPage> => {
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery) {
+    return {
+      items: [],
+      totalCount: 0,
+      page: 1,
+      perPage,
+      hasNextPage: false,
+    }
+  }
+
+  const safePage = Math.max(1, Math.floor(page))
+  const safePerPage = Math.min(Math.max(Math.floor(perPage), 1), 100)
+  const search = new URLSearchParams({
+    q: `${normalizedQuery} in:name,description`,
+    sort: 'stars',
+    order: 'desc',
+    page: String(safePage),
+    per_page: String(safePerPage),
+  })
+
+  const payload = await fetchJson<GitHubSearchResponse>(`https://api.github.com/search/repositories?${search.toString()}`)
+
+  const items = (payload.items ?? []).map((item) => ({
+    id: item.full_name.toLowerCase(),
+    owner: item.owner.login,
+    repo: item.name,
+    fullName: item.full_name,
+    description: item.description ?? '',
+    htmlUrl: item.html_url,
+    language: item.language,
+    stars: item.stargazers_count,
+    forks: item.forks_count,
+    topics: item.topics ?? [],
+    updatedAt: item.updated_at,
+  }))
+
+  return {
+    items,
+    totalCount: Number.isFinite(payload.total_count) ? Math.max(0, payload.total_count) : 0,
+    page: safePage,
+    perPage: safePerPage,
+    hasNextPage: safePage * safePerPage < (payload.total_count ?? 0),
   }
 }

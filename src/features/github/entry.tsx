@@ -9,7 +9,9 @@ import { Pagination } from '@features/github/ui/Pagination'
 import { RepoCard } from '@features/github/ui/RepoCard'
 import { RepoDetailModal } from '@features/github/ui/RepoDetailModal'
 import { RepoInputForm } from '@features/github/ui/RepoInputForm'
-import { fetchRepo } from '@features/github/services/github'
+import { RepoSearchForm } from '@features/github/ui/RepoSearchForm'
+import type { GitHubRepoSearchItem } from '@features/github/services/github'
+import { fetchRepo, searchPublicRepos } from '@features/github/services/github'
 import { dashboardReducer, initialState } from '@features/github/state/dashboardReducer'
 import {
   CARDS_PER_PAGE,
@@ -23,9 +25,10 @@ import {
   saveNotes,
   saveSelectedCategoryId,
 } from '@shared/storage/localStorage'
-import type { Category, RepoNote, ThemeMode } from '@shared/types'
+import type { Category, CategoryId, GitHubRepoCard, RepoNote, ThemeMode } from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { parseGitHubRepoUrl } from '@utils/parseGitHubRepoUrl'
+import { buildSummary } from '@utils/summary'
 
 type GithubFeatureEntryProps = {
   themeMode: ThemeMode
@@ -66,6 +69,31 @@ const hasDuplicateCategoryName = (
   })
 }
 
+const GITHUB_SEARCH_MAX_TOTAL_COUNT = 1000
+
+const mapPublicSearchItemToCard = (item: GitHubRepoSearchItem): GitHubRepoCard => ({
+  id: item.id.toLowerCase(),
+  categoryId: DEFAULT_MAIN_CATEGORY_ID,
+  owner: item.owner,
+  repo: item.repo,
+  fullName: item.fullName,
+  description: item.description,
+  summary: buildSummary(item.description, null),
+  htmlUrl: item.htmlUrl,
+  homepage: null,
+  language: item.language,
+  stars: item.stars,
+  forks: item.forks,
+  watchers: 0,
+  openIssues: 0,
+  topics: item.topics,
+  license: null,
+  defaultBranch: 'main',
+  createdAt: item.updatedAt,
+  updatedAt: item.updatedAt,
+  addedAt: new Date().toISOString(),
+})
+
 export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEntryProps) => {
   const remoteEnabled = isRemoteSnapshotEnabled()
   const [state, dispatch] = useReducer(dashboardReducer, undefined, initialState)
@@ -74,8 +102,17 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
   const [hasLoadedRemote, setHasLoadedRemote] = useState(!remoteEnabled)
   const [remoteSyncDegraded, setRemoteSyncDegraded] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<GitHubRepoSearchItem[]>([])
+  const [searchTotalCount, setSearchTotalCount] = useState(0)
+  const [searchPage, setSearchPage] = useState(1)
+  const [hasSearchedPublicRepos, setHasSearchedPublicRepos] = useState(false)
+  const [addingFromSearchId, setAddingFromSearchId] = useState<string | null>(null)
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
+  const [previewRepo, setPreviewRepo] = useState<GitHubRepoCard | null>(null)
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -98,6 +135,34 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
     () => state.cards.find((card) => card.id === state.selectedRepoId) ?? null,
     [state.cards, state.selectedRepoId],
   )
+
+  const cardsById = useMemo(() => {
+    return new Map(state.cards.map((card) => [card.id, card]))
+  }, [state.cards])
+
+  const searchResultCards = useMemo(
+    () =>
+      searchResults.map((item) => {
+        const existing = cardsById.get(item.id)
+        if (existing) {
+          return {
+            repo: existing,
+            variant: 'saved' as const,
+          }
+        }
+
+        return {
+          repo: mapPublicSearchItemToCard(item),
+          variant: 'search-unsaved' as const,
+        }
+      }),
+    [cardsById, searchResults],
+  )
+
+  const searchTotalPages = useMemo(() => {
+    const cappedTotalCount = Math.min(searchTotalCount, GITHUB_SEARCH_MAX_TOTAL_COUNT)
+    return pageCount(cappedTotalCount, CARDS_PER_PAGE)
+  }, [searchTotalCount])
 
   useEffect(() => {
     if (!remoteEnabled) {
@@ -243,6 +308,102 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
     }
   }
 
+  const handleSearchPublicRepos = async (nextPage = 1): Promise<void> => {
+    if (hydrating) {
+      setSearchErrorMessage('원격 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.')
+      return
+    }
+
+    if (state.selectedCategoryId !== DEFAULT_MAIN_CATEGORY_ID) {
+      setSearchErrorMessage('공개 저장소 검색은 메인 카테고리에서만 가능합니다.')
+      return
+    }
+
+    const normalizedQuery = searchQuery.trim()
+    if (normalizedQuery.length < 2) {
+      setHasSearchedPublicRepos(true)
+      setSearchResults([])
+      setSearchTotalCount(0)
+      setSearchPage(1)
+      setSearchErrorMessage('검색어는 2자 이상 입력해 주세요.')
+      return
+    }
+
+    setSearchLoading(true)
+    setSearchErrorMessage(null)
+    setHasSearchedPublicRepos(true)
+
+    try {
+      const response = await searchPublicRepos(normalizedQuery, nextPage, CARDS_PER_PAGE)
+      setSearchResults(response.items)
+      setSearchTotalCount(response.totalCount)
+      setSearchPage(response.page)
+    } catch (error) {
+      setSearchResults([])
+      setSearchTotalCount(0)
+      setSearchPage(1)
+      setSearchErrorMessage(error instanceof Error ? error.message : '공개 저장소 검색에 실패했습니다.')
+    } finally {
+      setSearchLoading(false)
+    }
+  }
+
+  const handleAddFromSearch = async (repoId: string): Promise<void> => {
+    if (state.cards.some((card) => card.id === repoId)) {
+      setSearchErrorMessage('이미 추가된 저장소입니다.')
+      return
+    }
+
+    const target = searchResults.find((item) => item.id === repoId)
+    if (!target) {
+      setSearchErrorMessage('검색 결과를 찾을 수 없습니다. 다시 검색해 주세요.')
+      return
+    }
+
+    setAddingFromSearchId(repoId)
+    setSearchErrorMessage(null)
+
+    try {
+      const card = await fetchRepo(target.owner, target.repo)
+      dispatch({
+        type: 'addCard',
+        payload: {
+          ...card,
+          categoryId: DEFAULT_MAIN_CATEGORY_ID,
+        },
+      })
+      dispatch({ type: 'setPage', payload: { page: 1 } })
+    } catch (error) {
+      setSearchErrorMessage(
+        error instanceof Error ? error.message : '검색 결과 저장소를 추가하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      )
+    } finally {
+      setAddingFromSearchId(null)
+    }
+  }
+
+  const handleOpenDetail = (repoId: string) => {
+    const saved = state.cards.find((card) => card.id === repoId)
+    if (saved) {
+      setPreviewRepo(null)
+      dispatch({ type: 'selectRepo', payload: { repoId } })
+      return
+    }
+
+    const fromSearch = searchResults.find((item) => item.id === repoId)
+    if (!fromSearch) {
+      return
+    }
+
+    dispatch({ type: 'closeModal' })
+    setPreviewRepo(mapPublicSearchItemToCard(fromSearch))
+  }
+
+  const handleCloseDetailModal = () => {
+    setPreviewRepo(null)
+    dispatch({ type: 'closeModal' })
+  }
+
   const handleDeleteCard = (repoId: string) => {
     const target = state.cards.find((card) => card.id === repoId)
     if (!target) {
@@ -335,7 +496,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
     setCategoryMessage('카테고리를 삭제하고 저장소를 창고로 이동했습니다.')
   }
 
-  const handleMoveCard = (repoId: string, targetCategoryId: string) => {
+  const handleMoveCard = (repoId: string, targetCategoryId: CategoryId) => {
     dispatch({
       type: 'moveCardToCategory',
       payload: {
@@ -391,12 +552,80 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
       </section>
 
       {state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID ? (
-        <RepoInputForm onSubmit={handleSubmitRepo} loading={loading || hydrating} errorMessage={errorMessage} />
+        <section className="repo-input-split">
+          <RepoInputForm onSubmit={handleSubmitRepo} loading={loading || hydrating} errorMessage={errorMessage} />
+          <RepoSearchForm
+            value={searchQuery}
+            loading={searchLoading || hydrating}
+            errorMessage={searchErrorMessage}
+            onChange={(value) => {
+              setSearchQuery(value)
+              if (searchErrorMessage) {
+                setSearchErrorMessage(null)
+              }
+            }}
+            onSubmit={async () => {
+              await handleSearchPublicRepos(1)
+            }}
+          />
+        </section>
       ) : (
         <section className="main-only-notice" aria-live="polite">
           <p>저장소 추가는 메인 카테고리에서만 가능합니다.</p>
         </section>
       )}
+
+      {state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID && hasSearchedPublicRepos ? (
+        <section className="search-result-section" aria-live="polite">
+          <header className="search-result-header">
+            <h2>GitHub 공개 검색 결과</h2>
+            <p>
+              검색어: <strong>{searchQuery.trim() || '-'}</strong>
+            </p>
+          </header>
+
+          {searchLoading ? (
+            <div className="empty-state">
+              <h2>검색 중...</h2>
+              <p>GitHub 공개 저장소를 조회하고 있습니다.</p>
+            </div>
+          ) : null}
+
+          {!searchLoading && searchResultCards.length === 0 ? (
+            <div className="empty-state">
+              <h2>검색 결과가 없습니다</h2>
+              <p>다른 키워드로 다시 검색해 보세요.</p>
+            </div>
+          ) : null}
+
+          {!searchLoading && searchResultCards.length > 0 ? (
+            <>
+              <div className="card-grid">
+                {searchResultCards.map(({ repo, variant }) => (
+                  <RepoCard
+                    key={`search-${repo.id}`}
+                    repo={repo}
+                    variant={variant}
+                    addLoading={addingFromSearchId === repo.id}
+                    categories={state.categories}
+                    onOpenDetail={handleOpenDetail}
+                    onDelete={handleDeleteCard}
+                    onMove={handleMoveCard}
+                    onAddFromSearch={handleAddFromSearch}
+                  />
+                ))}
+              </div>
+              <Pagination
+                currentPage={searchPage}
+                totalPages={searchTotalPages}
+                onChangePage={(page) => {
+                  void handleSearchPublicRepos(page)
+                }}
+              />
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="card-grid-section" aria-live="polite">
         {hydrating ? (
@@ -425,7 +654,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
                   key={repo.id}
                   repo={repo}
                   categories={state.categories}
-                  onOpenDetail={(repoId) => dispatch({ type: 'selectRepo', payload: { repoId } })}
+                  onOpenDetail={handleOpenDetail}
                   onDelete={handleDeleteCard}
                   onMove={handleMoveCard}
                 />
@@ -441,9 +670,10 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme }: GithubFeatureEn
       </section>
 
       <RepoDetailModal
-        repo={selectedRepo}
+        repo={selectedRepo ?? previewRepo}
+        mode={selectedRepo ? 'saved' : previewRepo ? 'preview' : 'saved'}
         notes={selectedRepo ? state.notesByRepo[selectedRepo.id] ?? [] : []}
-        onClose={() => dispatch({ type: 'closeModal' })}
+        onClose={handleCloseDetailModal}
         onAddNote={handleAddNote}
       />
 

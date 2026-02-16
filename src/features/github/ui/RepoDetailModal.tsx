@@ -11,6 +11,7 @@ import { renderMarkdownToSafeHtml } from '@utils/markdown'
 type RepoDetailModalProps = {
   repo: GitHubRepoCard | null
   notes: RepoNote[]
+  mode?: 'saved' | 'preview'
   onClose: () => void
   onAddNote: (repoId: string, content: string) => void
 }
@@ -56,7 +57,7 @@ const HeaderBadge = ({ icon, label, value }: { icon: HeaderBadgeIcon; label: str
   )
 }
 
-export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailModalProps) => {
+export const RepoDetailModal = ({ repo, notes, mode = 'saved', onClose, onAddNote }: RepoDetailModalProps) => {
   const [noteInput, setNoteInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
@@ -79,6 +80,7 @@ export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailM
     readme: false,
     activity: false,
   })
+  const isPreviewMode = mode === 'preview'
   const [translationError, setTranslationError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -354,6 +356,9 @@ export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailM
 
   const handleSubmitNote = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (isPreviewMode) {
+      return
+    }
     const content = noteInput.trim()
 
     if (!content) {
@@ -569,9 +574,11 @@ export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailM
               onChange={(event) => setNoteInput(event.target.value)}
               placeholder="간단한 아이디어나 작업 기록을 남겨 보세요."
               maxLength={MAX_NOTE_LENGTH}
+              disabled={isPreviewMode}
             />
-            <button type="submit">입력</button>
+            <button type="submit" disabled={isPreviewMode}>입력</button>
           </form>
+          {isPreviewMode ? <p className="detail-status">검색 결과 미리보기에서는 메모를 남길 수 없습니다.</p> : null}
           <p className="note-counter">
             {noteInput.length}/{MAX_NOTE_LENGTH}
           </p>

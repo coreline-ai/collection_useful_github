@@ -5,6 +5,7 @@ import { AppShell } from './AppShell'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
+  searchPublicRepos: vi.fn().mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 12, hasNextPage: false }),
   fetchRepoDetail: vi.fn().mockResolvedValue({ readmePreview: null, recentActivity: [] }),
   fetchLatestCommitSha: vi.fn().mockResolvedValue(null),
 }))
@@ -28,7 +29,7 @@ describe('AppShell', () => {
 
     expect(screen.getByRole('tab', { name: '깃허브' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '검색' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '통합검색' })).toHaveAttribute('aria-selected', 'false')
   })
 
   it('switches to unified-search section and hides github board', () => {

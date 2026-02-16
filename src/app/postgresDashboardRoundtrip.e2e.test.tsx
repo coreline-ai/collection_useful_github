@@ -5,6 +5,7 @@ import type { GitHubRepoCard } from '@shared/types'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
+  searchPublicRepos: vi.fn().mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 12, hasNextPage: false }),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
 }))

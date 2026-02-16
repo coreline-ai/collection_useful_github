@@ -5,9 +5,12 @@ import { formatDate, formatNumber } from '@utils/format'
 type RepoCardProps = {
   repo: GitHubRepoCard
   categories: Category[]
+  variant?: 'saved' | 'search-unsaved'
+  addLoading?: boolean
   onOpenDetail: (repoId: string) => void
   onDelete: (repoId: string) => void
   onMove: (repoId: string, targetCategoryId: CategoryId) => void
+  onAddFromSearch?: (repoId: string) => void
 }
 
 const Stat = ({ label, value }: { label: string; value: number }) => (
@@ -17,9 +20,19 @@ const Stat = ({ label, value }: { label: string; value: number }) => (
   </div>
 )
 
-export const RepoCard = ({ repo, categories, onOpenDetail, onDelete, onMove }: RepoCardProps) => {
+export const RepoCard = ({
+  repo,
+  categories,
+  variant = 'saved',
+  addLoading = false,
+  onOpenDetail,
+  onDelete,
+  onMove,
+  onAddFromSearch,
+}: RepoCardProps) => {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
+  const isSearchUnsaved = variant === 'search-unsaved'
 
   useEffect(() => {
     if (!isMoveMenuOpen) {
@@ -52,6 +65,7 @@ export const RepoCard = ({ repo, categories, onOpenDetail, onDelete, onMove }: R
               type="button"
               className="move-button"
               aria-label="카테고리 이동"
+              disabled={isSearchUnsaved}
               onClick={(event) => {
                 event.stopPropagation()
                 setIsMoveMenuOpen((current) => !current)
@@ -82,6 +96,7 @@ export const RepoCard = ({ repo, categories, onOpenDetail, onDelete, onMove }: R
           <button
             type="button"
             className="delete-button"
+            disabled={isSearchUnsaved}
             onClick={(event) => {
               event.stopPropagation()
               onDelete(repo.id)
@@ -114,16 +129,32 @@ export const RepoCard = ({ repo, categories, onOpenDetail, onDelete, onMove }: R
         >
           GitHub 링크
         </a>
-        <button
-          type="button"
-          className="detail-button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenDetail(repo.id)
-          }}
-        >
-          상세 보기
-        </button>
+        <div className="repo-card-footer-actions">
+          <button
+            type="button"
+            className="detail-button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onOpenDetail(repo.id)
+            }}
+          >
+            상세 보기
+          </button>
+          {isSearchUnsaved ? (
+            <button
+              type="button"
+              className="add-button"
+              aria-label={`${repo.fullName} 추가`}
+              disabled={addLoading}
+              onClick={(event) => {
+                event.stopPropagation()
+                onAddFromSearch?.(repo.id)
+              }}
+            >
+              {addLoading ? '추가 중...' : '추가'}
+            </button>
+          ) : null}
+        </div>
       </footer>
     </article>
   )

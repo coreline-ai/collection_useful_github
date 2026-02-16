@@ -6,6 +6,7 @@ import type { GitHubRepoCard, RepoDetailData } from './types'
 
 vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
+  searchPublicRepos: vi.fn().mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 12, hasNextPage: false }),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
 }))
@@ -23,7 +24,9 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   importUnifiedBackup: vi.fn().mockResolvedValue(undefined),
 }))
 
-const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
+const { fetchRepo, searchPublicRepos, fetchRepoDetail, fetchLatestCommitSha } = await import(
+  '@features/github/services/github'
+)
 
 const mockCard: GitHubRepoCard = {
   id: 'facebook/react',
@@ -83,6 +86,13 @@ describe('App', () => {
     vi.clearAllMocks()
     window.localStorage.clear()
     mockMatchMedia(false)
+    vi.mocked(searchPublicRepos).mockResolvedValue({
+      items: [],
+      totalCount: 0,
+      page: 1,
+      perPage: 12,
+      hasNextPage: false,
+    })
     vi.mocked(fetchRepoDetail).mockResolvedValue(mockDetail)
     vi.mocked(fetchLatestCommitSha).mockResolvedValue('abc123')
   })
@@ -113,6 +123,84 @@ describe('App', () => {
 
     expect(screen.getByRole('tab', { name: '깃허브' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
+    expect(screen.getByLabelText('GitHub 공개 저장소 검색')).toBeInTheDocument()
+  })
+
+  it('searches public repositories and adds from result card', async () => {
+    vi.mocked(searchPublicRepos).mockResolvedValue({
+      items: [
+        {
+          id: 'facebook/react',
+          owner: 'facebook',
+          repo: 'react',
+          fullName: 'facebook/react',
+          description: 'React public search result',
+          htmlUrl: 'https://github.com/facebook/react',
+          language: 'TypeScript',
+          stars: 1,
+          forks: 1,
+          topics: ['react'],
+          updatedAt: '2026-02-15T00:00:00.000Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      perPage: 12,
+      hasNextPage: false,
+    })
+    vi.mocked(fetchRepo).mockResolvedValue(mockCard)
+
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('GitHub 공개 저장소 검색'), { target: { value: 'react' } })
+    fireEvent.click(screen.getByRole('button', { name: '검색' }))
+
+    expect(await screen.findByText('GitHub 공개 검색 결과')).toBeInTheDocument()
+    expect(screen.getByText('React public search result')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'facebook/react 삭제' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '카테고리 이동' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'facebook/react 추가' }))
+
+    const summaries = await screen.findAllByText('React summary text')
+    expect(summaries.length).toBeGreaterThan(0)
+    expect(fetchRepo).toHaveBeenCalledWith('facebook', 'react')
+  })
+
+  it('opens preview detail from public search result and disables note input', async () => {
+    vi.mocked(searchPublicRepos).mockResolvedValue({
+      items: [
+        {
+          id: 'facebook/react',
+          owner: 'facebook',
+          repo: 'react',
+          fullName: 'facebook/react',
+          description: 'React public search result',
+          htmlUrl: 'https://github.com/facebook/react',
+          language: 'TypeScript',
+          stars: 1,
+          forks: 1,
+          topics: ['react'],
+          updatedAt: '2026-02-15T00:00:00.000Z',
+        },
+      ],
+      totalCount: 1,
+      page: 1,
+      perPage: 12,
+      hasNextPage: false,
+    })
+
+    render(<App />)
+
+    fireEvent.change(screen.getByLabelText('GitHub 공개 저장소 검색'), { target: { value: 'react' } })
+    fireEvent.click(screen.getByRole('button', { name: '검색' }))
+    await screen.findByText('GitHub 공개 검색 결과')
+
+    fireEvent.click(screen.getByRole('button', { name: '상세 보기' }))
+
+    await screen.findByRole('dialog')
+    expect(screen.getByText('검색 결과 미리보기에서는 메모를 남길 수 없습니다.')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('간단한 아이디어나 작업 기록을 남겨 보세요.')).toBeDisabled()
   })
 
   it('switches to youtube placeholder and hides github board', () => {
@@ -169,6 +257,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '프론트엔드' }))
 
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('GitHub 공개 저장소 검색')).not.toBeInTheDocument()
     expect(screen.getByText('저장소 추가는 메인 카테고리에서만 가능합니다.')).toBeInTheDocument()
   })
 
