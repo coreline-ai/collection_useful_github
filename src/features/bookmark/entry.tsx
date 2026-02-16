@@ -28,7 +28,7 @@ import {
   saveBookmarkCategories,
   saveBookmarkSelectedCategoryId,
 } from '@shared/storage/localStorage'
-import type { Category, CategoryId, SyncConnectionStatus, ThemeMode } from '@shared/types'
+import type { BookmarkCard as BookmarkCardItem, Category, CategoryId, SyncConnectionStatus, ThemeMode } from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { isRemoteSyncConnectionWarning, isTransientRemoteSyncError } from '@utils/remoteSync'
 
@@ -62,6 +62,131 @@ const hasDuplicateCategoryName = (
 
     return category.name.toLocaleLowerCase('ko-KR') === normalized
   })
+}
+
+type DuplicateGroup = {
+  key: string
+  reason: 'resolved' | 'canonical' | 'content'
+  cards: BookmarkCardItem[]
+}
+
+const toContentBaseUrl = (value: string | null | undefined): string | null => {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    url.search = ''
+    if (url.pathname.length > 1) {
+      url.pathname = url.pathname.replace(/\/+$/, '')
+      if (!url.pathname) {
+        url.pathname = '/'
+      }
+    }
+    return url.toString().replace(/\?$/, '')
+  } catch {
+    return null
+  }
+}
+
+const normalizeText = (value: string): string => value.toLocaleLowerCase('en-US').replace(/\s+/g, ' ').trim()
+
+const findDuplicateGroups = (cards: BookmarkCardItem[]): DuplicateGroup[] => {
+  const groupsByKey = new Map<string, DuplicateGroup>()
+
+  cards.forEach((card) => {
+    const resolvedBase = toContentBaseUrl(card.lastResolvedUrl)
+    if (resolvedBase) {
+      const key = `resolved:${resolvedBase}`
+      const existing = groupsByKey.get(key)
+      if (existing) {
+        existing.cards.push(card)
+      } else {
+        groupsByKey.set(key, { key, reason: 'resolved', cards: [card] })
+      }
+    }
+
+    const canonicalBase = toContentBaseUrl(card.canonicalUrl)
+    if (canonicalBase) {
+      const key = `canonical:${canonicalBase}`
+      const existing = groupsByKey.get(key)
+      if (existing) {
+        existing.cards.push(card)
+      } else {
+        groupsByKey.set(key, { key, reason: 'canonical', cards: [card] })
+      }
+    }
+
+    const normalizedTitle = normalizeText(card.title)
+    const normalizedExcerpt = normalizeText(card.excerpt)
+    if (normalizedTitle.length >= 15 && normalizedExcerpt.length >= 30) {
+      const key = `content:${normalizedTitle}|${normalizedExcerpt.slice(0, 120)}`
+      const existing = groupsByKey.get(key)
+      if (existing) {
+        existing.cards.push(card)
+      } else {
+        groupsByKey.set(key, { key, reason: 'content', cards: [card] })
+      }
+    }
+  })
+
+  const uniqueGroups = new Map<string, DuplicateGroup>()
+
+  for (const group of groupsByKey.values()) {
+    const uniqueCards = Array.from(new Map(group.cards.map((card) => [card.normalizedUrl, card])).values())
+    if (uniqueCards.length < 2) {
+      continue
+    }
+
+    const signature = uniqueCards
+      .map((card) => card.normalizedUrl)
+      .sort((left, right) => left.localeCompare(right))
+      .join('|')
+
+    if (!uniqueGroups.has(signature)) {
+      uniqueGroups.set(signature, {
+        ...group,
+        cards: uniqueCards,
+      })
+    }
+  }
+
+  return Array.from(uniqueGroups.values()).sort((left, right) => right.cards.length - left.cards.length)
+}
+
+const choosePrimaryCard = (cards: BookmarkCardItem[]): BookmarkCardItem => {
+  const sorted = [...cards].sort((left, right) => {
+    if (left.categoryId === 'warehouse' && right.categoryId !== 'warehouse') {
+      return 1
+    }
+    if (left.categoryId !== 'warehouse' && right.categoryId === 'warehouse') {
+      return -1
+    }
+
+    const leftBroken = left.linkStatus === 'not_found' || left.linkStatus === 'error' || left.linkStatus === 'timeout'
+    const rightBroken =
+      right.linkStatus === 'not_found' || right.linkStatus === 'error' || right.linkStatus === 'timeout'
+    if (leftBroken && !rightBroken) {
+      return 1
+    }
+    if (!leftBroken && rightBroken) {
+      return -1
+    }
+
+    const leftChecked = left.lastCheckedAt ? new Date(left.lastCheckedAt).getTime() : 0
+    const rightChecked = right.lastCheckedAt ? new Date(right.lastCheckedAt).getTime() : 0
+    if (leftChecked !== rightChecked) {
+      return rightChecked - leftChecked
+    }
+
+    const leftAdded = new Date(left.addedAt).getTime()
+    const rightAdded = new Date(right.addedAt).getTime()
+    return rightAdded - leftAdded
+  })
+
+  return sorted[0]
 }
 
 export const BookmarkFeatureEntry = ({
@@ -129,6 +254,8 @@ export const BookmarkFeatureEntry = ({
   const categoryNameById = useMemo(() => {
     return new Map(state.categories.map((category) => [category.id, category.name]))
   }, [state.categories])
+
+  const duplicateGroups = useMemo(() => findDuplicateGroups(state.cards), [state.cards])
 
   useEffect(() => {
     cardsRef.current = state.cards
@@ -503,6 +630,30 @@ export const BookmarkFeatureEntry = ({
     })
   }
 
+  const handleMergeDuplicateGroup = (group: DuplicateGroup) => {
+    const primary = choosePrimaryCard(group.cards)
+    const targets = group.cards.filter((card) => card.normalizedUrl !== primary.normalizedUrl)
+
+    if (targets.length === 0) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        `중복 카드 ${targets.length}개를 정리할까요?\n유지 카드: ${primary.title} (${primary.normalizedUrl})`,
+      )
+    ) {
+      return
+    }
+
+    targets.forEach((target) => {
+      dispatch({ type: 'removeCard', payload: { normalizedUrl: target.normalizedUrl } })
+    })
+
+    setErrorMessage(null)
+    setCategoryMessage(`중복 카드 ${targets.length}개를 정리했습니다.`)
+  }
+
   return (
     <>
       <section className="category-section" aria-label="카테고리 영역">
@@ -572,6 +723,50 @@ export const BookmarkFeatureEntry = ({
       {isSearchMode ? (
         <section className="local-search-notice" aria-live="polite">
           <p>검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.</p>
+        </section>
+      ) : null}
+
+      {!hydrating && visibleCards.length > 0 ? (
+        <section className="bookmark-tools-bar" aria-live="polite">
+          {duplicateGroups.length > 0 ? (
+            <span className="bookmark-duplicate-count">
+              중복 의심 그룹 {duplicateGroups.length}개
+            </span>
+          ) : (
+            <span className="bookmark-duplicate-count">중복 의심 그룹 없음</span>
+          )}
+        </section>
+      ) : null}
+
+      {!hydrating && duplicateGroups.length > 0 ? (
+        <section className="bookmark-duplicate-panel" aria-label="중복 정리 도우미">
+          <h3>중복 정리 도우미</h3>
+          <div className="bookmark-duplicate-list">
+            {duplicateGroups.map((group) => {
+              const primary = choosePrimaryCard(group.cards)
+              const reasonLabel =
+                group.reason === 'resolved' ? '리다이렉트 최종 URL' : group.reason === 'canonical' ? 'canonical URL' : '내용 유사'
+
+              return (
+                <article key={group.key} className="bookmark-duplicate-item">
+                  <div>
+                    <strong>{reasonLabel}</strong>
+                    <p>{group.cards.length}개 카드가 같은 콘텐츠로 추정됩니다.</p>
+                    <p className="bookmark-duplicate-primary">
+                      유지 추천: {primary.title}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="bookmark-tool-button"
+                    onClick={() => handleMergeDuplicateGroup(group)}
+                  >
+                    중복 병합
+                  </button>
+                </article>
+              )
+            })}
+          </div>
         </section>
       ) : null}
 

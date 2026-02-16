@@ -19,6 +19,10 @@ describe('toBookmarkUnifiedItem', () => {
         addedAt: '2026-02-16T08:30:00.000Z',
         updatedAt: '2026-02-16T08:30:00.000Z',
         metadataStatus: 'ok',
+        linkStatus: 'unknown',
+        lastCheckedAt: null,
+        lastStatusCode: null,
+        lastResolvedUrl: null,
       },
       3,
     )
@@ -52,6 +56,10 @@ describe('toBookmarkUnifiedItem', () => {
         addedAt: '2026-02-16T08:30:00.000Z',
         updatedAt: '2026-02-16T08:30:00.000Z',
         metadataStatus: 'fallback',
+        linkStatus: 'unknown',
+        lastCheckedAt: null,
+        lastStatusCode: null,
+        lastResolvedUrl: null,
       },
       0,
     )

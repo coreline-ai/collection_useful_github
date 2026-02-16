@@ -4,254 +4,100 @@
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" />
   <img alt="Vite 7" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" />
-  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white" />
+  <img alt="Node 20+" src="https://img.shields.io/badge/Node-20+-339933?logo=node.js&logoColor=white" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" />
   <img alt="Vitest" src="https://img.shields.io/badge/Tested_with-Vitest-6E9F18?logo=vitest&logoColor=white" />
 </p>
 
-GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `github / youtube / bookmark` 데이터를 하나의 스키마로 조회하는 React + PostgreSQL 프로젝트입니다.
+GitHub, YouTube, Bookmark를 카드보드로 관리하고, PostgreSQL 통합 인덱스 기반 검색을 제공하는 단일 웹앱입니다.
 
-## 목차
+## 1. 핵심 요약
 
-- [핵심 기능](#핵심-기능)
-- [아키텍처](#아키텍처)
-- [통합검색 방식](#통합검색-방식)
-- [빠른 시작](#빠른-시작)
-- [환경 변수](#환경-변수)
-- [데이터 모델](#데이터-모델)
-- [프로젝트 구조](#프로젝트-구조)
-- [API 요약](#api-요약)
-- [스크립트](#스크립트)
-- [테스트](#테스트)
-- [트러블슈팅](#트러블슈팅)
-- [문서](#문서)
+- 최상단 탭: `통합검색 > 깃허브 > 유튜브 > 북마크`
+- 각 탭은 기능 모듈(`src/features/*`)로 분리
+- 모든 데이터는 서버의 `unified_items / unified_notes / unified_meta`로 정규화 저장
+- 각 보드는 원격 저장 실패 시 로컬 저장으로 자동 전환 후 재복구 시도
+- 통합검색은 PostgreSQL `FTS + prefix + trigram + recency` 하이브리드 랭킹 사용
 
-## 핵심 기능
+## 2. 사용자 기능
 
-### 1) 글로벌 탭
-- 최상단 탭 순서: `통합검색 > 깃허브 > 유튜브 > 북마크`
-- 마지막 선택 탭은 `top_section_v1`로 복원
-- `통합검색`은 탭 전용 화면으로 독립 분리
+### 2.1 GitHub 보드
 
-### 2) GitHub 보드
-- URL 입력으로 카드 생성 (`owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`)
-- 데스크톱 4열, 페이지당 12개, 페이지네이션 지원
-- 기본 카테고리: `메인(main)`, `창고(warehouse)` 자동 생성
-- 사용자 카테고리 생성/이름변경/삭제, 카드 이동(단일 소속)
-- 메인 카테고리에서만 신규 저장소 추가 가능
+- 저장소 URL/`owner/repo` 입력으로 카드 추가
+- 메인/창고/사용자 카테고리 관리
+- 카드 이동/삭제, 4열(데스크톱)/12개 페이지네이션
+- 등록 카드 로컬 검색(메인에서만 노출, 검색 시 전체 카테고리 통합 검색)
+- 상세 모달:
+  - 탭: `개요 / README / Activity`
+  - 메모 작성/저장
+  - 수동 번역(자동 번역 없음)
 
-### 3) 상세 모달
-- 탭: `개요 / README / Activity`
-- README는 sanitize된 Markdown 렌더링(heading anchor/table/task-list 스타일)
-- Activity는 저장소 이벤트 기반 타임라인
-- 메모 입력 후 즉시 누적, 영속 저장
+### 2.2 YouTube 보드
 
-### 4) YouTube 보드
-- 영상 URL 입력으로 카드 생성 (`watch`, `youtu.be`, `shorts`)
-- GitHub와 동일한 보드 플로우:
-  - 입력 2분할(영상 추가 + 등록 카드 검색)
-  - 카테고리/창고, 이동/삭제, 페이지네이션
-- 카드 레이아웃:
-  - 썸네일, 제목, 채널명, 조회수, 게시일, YouTube 링크
-- 상세 모달 없이 카드에서 링크로 바로 이동
-- YouTube 보드는 원격 실패 시 로컬 저장소로 degrade
+- 영상 URL(`watch`, `youtu.be`, `shorts`)로 카드 추가
+- 카드: 썸네일, 제목, 채널, 조회수, 게시일, 링크
+- 상세 모달 없음(카드에서 바로 링크 이동)
+- GitHub와 동일한 보드 UX(카테고리/검색/페이지네이션/이동/삭제)
 
-### 5) Bookmark 보드
-- URL 입력으로 카드 생성 (`http/https`만 허용)
-- GitHub/YouTube와 동일한 보드 플로우:
-  - 입력 2분할(URL 추가 + 등록 카드 검색)
-  - 카테고리/창고, 이동/삭제, 페이지네이션
-- 카드 레이아웃:
-  - 제목, 일부 내용(excerpt), 도메인, 링크
-  - 썸네일/파비콘(가능 시) + 메타 fallback 배지
-- 상세 모달 없이 카드에서 링크로 바로 이동
-- Bookmark 보드는 원격 실패 시 로컬 저장소로 degrade
+### 2.3 Bookmark 보드
 
-### 6) 수동 번역
-- 자동 번역 없음
-- 개요/README/Activity 각각 수동 번역 버튼 제공
-- GLM 우선, OpenAI fallback
+- URL(`http/https`) 입력으로 메타데이터 추출 후 카드 추가
+- 카드: 제목, excerpt, 도메인, 링크, 추가일
+- 메타 추출 실패 시 `fallback` 카드 생성(추가 차단하지 않음)
+- 중복 정리 도우미:
+  - 그룹 기준: `resolved URL`, `canonical URL`, `내용 유사`
+  - 그룹 단위 병합(유지 카드 1개 + 나머지 삭제)
 
-### 7) 통합검색 + 백업
-- Provider/Type 필터 포함 전역 검색
-- 검색 결과 스코어/매칭 신호(`exact/prefix/fts/trgm`) 지원
-- 백업 내보내기(JSON) / 백업 복원(JSON)
+### 2.4 통합검색
 
-### 8) 테마
-- `light | dark` 토글
-- 저장값 없을 때 OS 다크모드 1회 감지
-- 다크 테마는 순수 블랙 기반 팔레트
+- provider/type 필터 + 최근검색 + 백업 내보내기/복원
+- 검색 결과는 `UnifiedItem` 공통 모델로 표시
 
-## 아키텍처
+## 3. 코드 레벨 상세 분석
 
-### Feature Isolation
-- `src/features/github`
-- `src/features/unified-search`
-- `src/features/youtube`
-- `src/features/bookmark`
+## 3.1 AppShell 책임 분리
 
-각 feature는 독립 엔트리로 동작하고, 공통 계층(`src/core`, `src/shared`)만 참조합니다.
+- 파일: `src/app/AppShell.tsx`
+- 책임:
+  - 탭 상태(`TopSection`) 및 테마 상태(`ThemeMode`) 관리
+  - 초기 마이그레이션 실행(`runInitialMigrations()`)
+  - 각 feature entry 렌더링
+  - 탭별 동기화 상태 배지 연결
+- 원칙:
+  - AppShell은 기능 상세 로직을 가지지 않음
+  - 비즈니스 로직은 feature 내부 reducer/hook/service로 캡슐화
 
-### Shell Composition
-- `AppShell`은 탭 라우팅/테마/초기 마이그레이션만 담당
-- 비즈니스 로직은 각 feature 내부에서 처리
+## 3.2 Feature 경계
 
-### Data Layer
-- PostgreSQL 단일 스키마(`unified_items`, `unified_notes`, `unified_meta`)
-- 로컬 마이그레이션으로 기존 데이터를 unified 스키마로 이관
-- GitHub/YouTube/Bookmark 보드는 원격 실패 시 각 탭별 로컬 저장소로 degrade
+- GitHub: `src/features/github/*`
+- YouTube: `src/features/youtube/*`
+- Bookmark: `src/features/bookmark/*`
+- Unified Search: `src/features/unified-search/*`
 
-## 통합검색 방식
+각 feature entry 공통 패턴:
 
-서버 `/api/search` 기본 모드는 `mode=relevance`이며, 다음 신호를 결합합니다.
+- `useReducer` 기반 대시보드 상태
+- 원격 로드(hydrate) -> 원격 저장 -> 실패 시 로컬 전환
+- 재시도 임계치(`REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK`) 초과 시 `local`
+- 주기적 복구 시도(`REMOTE_SYNC_RECOVERY_INTERVAL_MS`)
 
-- `exact`: title/native id 정확 일치
-- `prefix`: title 접두사 일치
-- `fts`: `tsvector + websearch_to_tsquery` 기반 의미 검색
-- `trgm`: `pg_trgm similarity + word_similarity` 오탈자 보정
-- `recency`: 최근 업데이트 가점
+동기화 상태 값(`SyncConnectionStatus`):
 
-### 용어를 풀어쓴 동작 설명
+- `healthy`: 정상
+- `retrying`: 네트워크 재시도 중
+- `local`: 로컬 전환
+- `recovered`: 복구 완료(짧은 시간 표시 후 healthy 복귀)
 
-1. 검색어 정규화
-- 서버는 검색어를 `lower + unaccent` 처리해 대소문자/악센트 영향을 줄입니다.
+## 3.3 데이터 모델
 
-2. FTS(Full-Text Search, 전문 검색)
-- `tsvector`는 제목/요약/설명을 검색용 토큰으로 미리 만든 벡터입니다.
-- `websearch_to_tsquery`는 사용자가 입력한 검색어를 질의 객체(`tsquery`)로 변환합니다.
-- 제목(A), 요약(B), 설명(C) 가중치를 다르게 부여해 제목 일치를 더 높게 평가합니다.
-
-3. Prefix(접두사) 매칭
-- `title LIKE '검색어%'` 조건으로 “앞글자부터 맞는” 결과를 가점 처리합니다.
-- 예: `rea` 입력 시 `react` 계열이 빠르게 상단 노출됩니다.
-
-4. Trigram(3글자 조각) 오탈자 보정
-- 문자열을 3글자 단위 조각으로 비교해 유사도를 계산합니다.
-- `similarity + word_similarity`를 함께 사용해 `raect` 같은 철자 오차도 탐지합니다.
-- 현재 구현은 검색어 길이에 따라 임계치를 다르게 적용합니다.
-  - 길이 4자 이상: 0.10 이상
-  - 길이 2~3자: 0.16 이상
-  - 길이 1자: trigram 실질 비활성(노이즈 방지)
-
-5. 최신성 보정(Recency Boost)
-- `updated_at`이 최근일수록 추가 점수를 부여합니다.
-- 같은 관련도라면 최신 데이터가 먼저 나오도록 보정합니다.
-
-랭킹 수식(요약):
-
-```text
-score =
-  exact*5.0 +
-  prefix*2.5 +
-  fts_rank*1.8 +
-  trgm_similarity*1.2 +
-  recency_boost*0.4
-```
-
-정렬은 `score DESC, updated_at DESC`입니다.
-
-### 클라이언트 검색 캐시
-- 메모리 TTL/LRU 결과 캐시:
-  - TTL(Time To Live): 60초
-  - LRU(Least Recently Used): 최대 50개를 넘으면 가장 오래 안 쓴 캐시부터 제거
-- 최근검색(localStorage): `unified_recent_queries_v1`에 최대 20개 저장
-- 캐시 키 구성: `query/provider/type/limit/mode/fuzzy/prefix/minScore` 조합
-
-## 빠른 시작
-
-### 1) 설치
-
-```bash
-npm install
-npm --prefix server install
-```
-
-### 2) 환경 파일 준비
-
-```bash
-cp .env.example .env.local
-cp server/.env.example server/.env
-```
-
-### 3) PostgreSQL 실행
-
-```bash
-cd server
-docker-compose up -d
-cd ..
-```
-
-### 4) 스키마 반영
-
-```bash
-npm run server:migrate
-```
-
-### 5) 개발 서버 실행 (권장: 통합 실행)
-
-```bash
-npm run dev:all
-```
-
-`dev:all`은 API(4000)와 프론트(5173)를 한 프로세스 트리로 함께 실행해
-"프론트만 죽고 포트가 닫히는" 상황을 줄이도록 구성되어 있습니다.
-
-개별 실행이 필요하면 아래를 사용하세요.
-
-```bash
-npm run server:dev
-npm run dev
-```
-
-실행 주소:
-- Frontend: `http://localhost:5173`
-- API: `http://localhost:4000`
-- Health: `http://localhost:4000/api/health`
-
-## 환경 변수
-
-### Client (`.env.local`)
-
-| 변수 | 필수 | 기본값 | 설명 |
-|---|---|---|---|
-| `VITE_GITHUB_TOKEN` | 선택 | - | GitHub API rate-limit 완화 |
-| `VITE_GITHUB_TIMEOUT_SECONDS` | 선택 | `12` | GitHub API 타임아웃(초) |
-| `GLM_API_KEY` | 선택 | - | GLM 번역 API 키 |
-| `GLM_BASE_URL` | 선택 | `https://api.z.ai/api/coding/paas/v4` | GLM API Base URL |
-| `GLM_MODEL` | 선택 | `glm-4.7` | GLM 모델 |
-| `GLM_TIMEOUT_SECONDS` | 선택 | `30` | GLM 타임아웃(초) |
-| `VITE_OPENAI_API_KEY` | 선택 | - | OpenAI 번역 fallback 키 |
-| `VITE_OPENAI_MODEL` | 선택 | `gpt-4.1-mini` | OpenAI fallback 모델 |
-| `VITE_OPENAI_TIMEOUT_SECONDS` | 선택 | `30` | OpenAI 타임아웃(초) |
-| `VITE_POSTGRES_SYNC_API_BASE_URL` | 선택 | `http://localhost:4000` | 원격 PostgreSQL API |
-
-### Server (`server/.env`)
-
-| 변수 | 필수 | 기본값 | 설명 |
-|---|---|---|---|
-| `PORT` | 선택 | `4000` | API 포트 |
-| `DATABASE_URL` | 선택 | - | 우선 접속 문자열 |
-| `PGHOST` | 선택 | `localhost` | DB 호스트 |
-| `PGPORT` | 선택 | `55432` | DB 포트 |
-| `PGUSER` | 선택 | `postgres` | DB 유저 |
-| `PGPASSWORD` | 선택 | `postgres` | DB 비밀번호 |
-| `PGDATABASE` | 선택 | `useful_git_info` | DB 이름 |
-| `PGSSL` | 선택 | `false` | SSL 사용 여부 |
-| `CORS_ORIGIN` | 선택 | `http://localhost:5173,http://localhost:5174` | CORS 허용 출처 |
-| `YOUTUBE_API_KEY` | YouTube 사용 시 필수 | - | YouTube Data API v3 키 |
-| `YOUTUBE_API_TIMEOUT_SECONDS` | 선택 | `12` | YouTube API 타임아웃(초) |
-| `BOOKMARK_FETCH_TIMEOUT_MS` | 선택 | `10000` | 북마크 메타데이터 fetch 타임아웃(ms) |
-| `BOOKMARK_MAX_RESPONSE_BYTES` | 선택 | `1048576` | 북마크 메타데이터 HTML 최대 읽기 바이트 |
-
-## 데이터 모델
-
-핵심 타입은 `src/types.ts`를 기준으로 합니다.
+핵심 타입은 `src/types.ts` 기준.
 
 ```ts
 type ProviderType = 'github' | 'youtube' | 'bookmark'
 type UnifiedItemType = 'repository' | 'video' | 'bookmark'
 
 type UnifiedItem = {
-  id: string // `${provider}:${nativeId}`
+  id: string
   provider: ProviderType
   type: UnifiedItemType
   nativeId: string
@@ -279,139 +125,241 @@ type UnifiedItem = {
 }
 ```
 
-주요 localStorage 키:
-- `top_section_v1`
-- `github_theme_mode_v1`
-- `unified_recent_queries_v1`
-- `github_cards_v1` (fallback/legacy)
-- `github_notes_v1` (fallback/legacy)
-- `github_repo_detail_cache_v1`
-- `youtube_cards_v1` (fallback/legacy)
-- `youtube_categories_v1` (fallback/legacy)
-- `youtube_selected_category_v1` (fallback/legacy)
-- `bookmark_cards_v1` (fallback/legacy)
-- `bookmark_categories_v1` (fallback/legacy)
-- `bookmark_selected_category_v1` (fallback/legacy)
+## 3.4 로컬 저장 키
 
-## 프로젝트 구조
+- GitHub: `github_cards_v1`, `github_notes_v1`, `github_categories_v1`, `github_selected_category_v1`
+- YouTube: `youtube_cards_v1`, `youtube_categories_v1`, `youtube_selected_category_v1`
+- Bookmark: `bookmark_cards_v1`, `bookmark_categories_v1`, `bookmark_selected_category_v1`
+- 공통: `top_section_v1`, `github_theme_mode_v1`, `unified_recent_queries_v1`
+
+## 3.5 통합검색 알고리즘 (현 구현)
+
+서버 파일: `server/src/index.js` (`GET /api/search`)
+DB 인덱스: `server/db/schema.sql`
+
+검색 신호:
+
+- `exact`: title/native_id/author 정확 일치
+- `prefix`: 정규화된 prefix 일치
+- `fts`: `tsvector + websearch_to_tsquery` 전문 검색
+- `trgm`: `similarity + word_similarity` 오탈자 보정
+- `recency`: 최근 업데이트 가점
+
+랭킹:
 
 ```text
-.
-├─ docs/
-│  ├─ PRD.md
-│  ├─ TRD.md
-│  ├─ PLAN.md
-│  └─ PLAN_EXTENTION1.md
-├─ server/
-│  ├─ db/schema.sql
-│  └─ src/index.js
-├─ scripts/
-│  ├─ run-postgres-e2e.sh
-│  └─ restore-dashboard-from-chrome-localstorage.mjs
-└─ src/
-   ├─ app/
-   │  └─ AppShell.tsx
-   ├─ core/
-   │  ├─ data/
-   │  │  ├─ adapters/
-   │  │  ├─ indexer.ts
-   │  │  ├─ migration.ts
-   │  │  ├─ repository.ts
-   │  │  └─ schema.ts
-   │  └─ navigation/topSection.ts
-   ├─ features/
-   │  ├─ github/
-   │  ├─ unified-search/
-   │  ├─ youtube/
-   │  └─ bookmark/
-   ├─ shared/
-   │  ├─ components/
-   │  ├─ storage/
-   │  └─ types.ts
-   ├─ services/
-   ├─ storage/
-   └─ utils/
+score =
+  exact*5.0 +
+  prefix*2.5 +
+  fts_rank*1.8 +
+  trgm_similarity*1.2 +
+  recency_boost*0.4
 ```
 
-## API 요약
+정렬:
 
-주요 엔드포인트:
+- `ORDER BY score DESC, updated_at DESC`
+
+짧은 검색어 노이즈 제어:
+
+- 길이 >= 4: typo threshold 0.1
+- 길이 2~3: typo threshold 0.16
+- 길이 1: trigram 실질 비활성
+
+클라이언트 최적화(`src/features/unified-search/state/useUnifiedSearchState.ts`):
+
+- 최근검색: localStorage 최대 20개
+- 결과 캐시: 메모리 TTL(60초) + LRU(최대 50개)
+- 캐시 키: `query/provider/type/limit/mode/fuzzy/prefix/minScore`
+
+## 3.6 Bookmark 메타 추출/보안
+
+서버 파일: `server/src/index.js` (`GET /api/bookmark/metadata`)
+
+- URL 정규화: host lower-case, hash 제거, tracking query 제거
+- 메타 우선순위:
+  - title: `og:title > twitter:title > <title> > domain`
+  - excerpt: `og:description > meta description > first paragraph > fallback 문구`
+- 제한:
+  - timeout(`BOOKMARK_FETCH_TIMEOUT_MS`)
+  - 최대 응답 바이트(`BOOKMARK_MAX_RESPONSE_BYTES`)
+  - redirect 최대 3회
+- SSRF 방어:
+  - localhost/loopback/private 대역 차단
+- 링크 상태 점검 API는 서버에 유지: `GET /api/bookmark/link-check`
+
+## 4. 프로젝트 구조
+
+```text
+src/
+  app/
+    AppShell.tsx
+  core/
+    data/
+      adapters/remoteDb.ts
+      migration.ts
+      repository.ts
+      schema.ts
+      indexer.ts
+    navigation/topSection.ts
+  features/
+    unified-search/
+    github/
+    youtube/
+    bookmark/
+  shared/
+    components/
+    storage/localStorage.ts
+  services/translation.ts
+server/
+  src/index.js
+  db/schema.sql
+```
+
+## 5. API 요약
+
+### 공통/운영
+
 - `GET /api/health`
 - `GET /api/health/deep`
-- `GET /api/github/dashboard`
-- `PUT /api/github/dashboard`
-- `GET /api/youtube/videos/:videoId`
-- `GET /api/youtube/dashboard`
-- `PUT /api/youtube/dashboard`
-- `GET /api/bookmark/metadata?url=...`
-- `GET /api/bookmark/dashboard`
-- `PUT /api/bookmark/dashboard`
-- `PUT /api/providers/:provider/snapshot`
-- `GET /api/providers/:provider/items`
-- `GET /api/items/:id`
 - `GET /api/search`
 - `GET /api/admin/export`
 - `POST /api/admin/import`
 
-## 스크립트
+### GitHub 대시보드
+
+- `GET /api/github/dashboard`
+- `PUT /api/github/dashboard`
+
+### YouTube
+
+- `GET /api/youtube/videos/:videoId`
+- `GET /api/youtube/dashboard`
+- `PUT /api/youtube/dashboard`
+
+### Bookmark
+
+- `GET /api/bookmark/metadata?url=...`
+- `GET /api/bookmark/link-check?url=...`
+- `GET /api/bookmark/dashboard`
+- `PUT /api/bookmark/dashboard`
+
+### 레거시 호환/관리
+
+- `PUT /api/providers/:provider/snapshot`
+- `GET /api/providers/:provider/items`
+- `GET /api/items/:id`
+
+## 6. 빠른 시작
+
+## 6.1 설치
 
 ```bash
-npm run dev                  # frontend dev (5173)
-npm run dev:all              # server+frontend (권장)
-npm run dev:status           # 4000/5173 상태 점검
-npm run server:dev           # backend watch
-npm run server:start         # backend start
-npm run server:migrate       # schema apply
-npm run build                # typecheck + build
-npm run preview              # preview build
-npm run lint                 # lint
-npm run test                 # unit/integration
-npm run test:e2e:postgres    # postgres e2e
-npm run test:watch           # watch mode
-npm run test:coverage        # coverage
-npm run restore:dashboard:chrome
+npm install
+npm --prefix server install
 ```
 
-## 테스트
-
-기본 실행:
+## 6.2 환경 파일 준비
 
 ```bash
-npm run test
+cp .env.example .env.local
+cp server/.env.example server/.env
 ```
 
-PostgreSQL E2E:
+## 6.3 PostgreSQL 실행
 
 ```bash
-npm run test:e2e:postgres
+cd server
+docker compose up -d
+cd ..
 ```
 
-`test:e2e:postgres`는 전용 DB/포트(`4100` 기본)를 사용해 메인 데이터 오염을 방지합니다.
-현재 GitHub/YouTube/Bookmark 스냅샷 라운드트립 E2E를 포함합니다.
+## 6.4 마이그레이션
 
-## 트러블슈팅
+```bash
+npm run server:migrate
+```
 
-### 1) `대시보드 저장에 실패했습니다`
-- `VITE_POSTGRES_SYNC_API_BASE_URL` 확인
-- `server` 실행 및 `/api/health` 정상 응답 확인
-- 실패 시 GitHub/YouTube/Bookmark feature는 로컬 저장으로 degrade됩니다.
+## 6.5 실행
 
-### 2) 통합검색 결과가 없거나 느림
-- 서버 `/api/search` 응답 확인
-- DB 확장(`pg_trgm`, `unaccent`) 및 인덱스 적용 확인
-- 동일 검색 반복 시 60초 캐시 동작 여부 확인
+```bash
+npm run dev:all
+```
 
-### 3) GitHub API 제한(403)
-- `VITE_GITHUB_TOKEN` 설정
-- 상세 캐시 사용/업데이트 빈도 점검
+기본 주소:
 
-### 4) 번역 미동작
-- `GLM_API_KEY` 또는 `VITE_OPENAI_API_KEY` 설정 확인
-- 타임아웃/모델 변수 확인
+- Front: `http://localhost:5173`
+- API: `http://localhost:4000`
 
-## 문서
+## 7. 환경 변수
+
+## 7.1 Client (`.env.local`)
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `VITE_GITHUB_TOKEN` | - | GitHub API rate limit 완화 |
+| `VITE_GITHUB_TIMEOUT_SECONDS` | `12` | GitHub API 타임아웃 |
+| `GLM_API_KEY` | - | 수동 번역(GLM) API 키 |
+| `GLM_BASE_URL` | `https://api.z.ai/api/coding/paas/v4` | GLM Base URL |
+| `GLM_MODEL` | `glm-4.7` | GLM 모델 |
+| `GLM_TIMEOUT_SECONDS` | `30` | GLM 타임아웃 |
+| `VITE_OPENAI_API_KEY` | - | 번역 fallback(OpenAI) API 키 |
+| `VITE_OPENAI_MODEL` | `gpt-4.1-mini` | OpenAI 모델 |
+| `VITE_OPENAI_TIMEOUT_SECONDS` | `30` | OpenAI 타임아웃 |
+| `VITE_POSTGRES_SYNC_API_BASE_URL` | `http://localhost:4000` | 서버 API base URL |
+
+## 7.2 Server (`server/.env`)
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `PORT` | `4000` | API 포트 |
+| `DATABASE_URL` | - | 우선 접속 문자열 |
+| `PGHOST` | `localhost` | DB 호스트 |
+| `PGPORT` | `55432` | DB 포트 |
+| `PGUSER` | `postgres` | DB 유저 |
+| `PGPASSWORD` | `postgres` | DB 비밀번호 |
+| `PGDATABASE` | `useful_git_info` | DB 이름 |
+| `PGSSL` | `false` | SSL 사용 여부 |
+| `CORS_ORIGIN` | `http://localhost:5173,http://localhost:5174` | 허용 Origin |
+| `YOUTUBE_API_KEY` | - | YouTube Data API 키 |
+| `YOUTUBE_API_TIMEOUT_SECONDS` | `12` | YouTube API 타임아웃 |
+| `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 fetch 타임아웃 |
+| `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 북마크 HTML 최대 바이트 |
+
+## 8. 스크립트
+
+- `npm run dev`: 프론트 개발 서버
+- `npm run server:dev`: 서버 개발 모드
+- `npm run dev:all`: 프론트+서버 동시 실행
+- `npm run server:migrate`: DB 스키마 반영
+- `npm run build`: 타입체크 + 프로덕션 빌드
+- `npm run lint`: ESLint
+- `npm test`: 단위/통합 테스트
+- `npm run test:e2e:postgres`: Postgres E2E 자동 실행
+- `npm run restore:dashboard:chrome`: Chrome LocalStorage 복구 스크립트
+
+## 9. 테스트 범위
+
+- 단위 테스트: reducer, 파서, 매핑, storage, search state
+- 통합 테스트: App/AppShell 탭 전환, 각 보드 주요 플로우
+- 서버/검색 E2E: 북마크 메타 API, provider sync, 검색 랭킹
+
+## 10. 트러블슈팅
+
+- `Failed to fetch` 반복:
+  - 서버 실행(`npm run server:dev`)
+  - `VITE_POSTGRES_SYNC_API_BASE_URL` 확인
+  - `CORS_ORIGIN`에 현재 프론트 주소 포함 확인
+- 통합검색 0건:
+  - provider/type 필터가 과도하게 좁혀졌는지 확인
+  - 데이터가 `unified_items`에 저장되었는지 `/api/providers/:provider/items`로 확인
+- YouTube 추가 실패:
+  - `YOUTUBE_API_KEY` 설정
+  - quota 초과 여부 확인
+
+## 11. 문서
 
 - 제품 요구사항: `docs/PRD.md`
 - 기술 설계: `docs/TRD.md`
-- 구현 계획: `docs/PLAN.md`
-- 확장 계획: `docs/PLAN_EXTENTION1.md`
+- 실행 계획/로드맵: `docs/PLAN.md`, `docs/PLAN_EXTENTION1.md`
+- 서버 실행 가이드: `server/README.md`

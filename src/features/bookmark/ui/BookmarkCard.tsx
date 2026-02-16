@@ -10,7 +10,13 @@ type BookmarkCardProps = {
   onMove: (normalizedUrl: string, targetCategoryId: CategoryId) => void
 }
 
-export const BookmarkCard = ({ card, categories, categoryName, onDelete, onMove }: BookmarkCardProps) => {
+export const BookmarkCard = ({
+  card,
+  categories,
+  categoryName,
+  onDelete,
+  onMove,
+}: BookmarkCardProps) => {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -94,19 +100,19 @@ export const BookmarkCard = ({ card, categories, categoryName, onDelete, onMove 
 
       <p className="repo-summary bookmark-excerpt">{card.excerpt}</p>
 
-      <div className="repo-meta-line bookmark-meta-line">
-        <span className="bookmark-favicon-wrap">
-          {card.faviconUrl ? <img src={card.faviconUrl} alt="" aria-hidden="true" className="bookmark-favicon" /> : null}
-          {card.domain}
-        </span>
-        <span>추가일: {formatDate(card.addedAt)}</span>
-      </div>
-
       <footer className="repo-card-footer">
-        <a href={card.url} target="_blank" rel="noreferrer">
-          링크 열기
-        </a>
-        {card.metadataStatus === 'fallback' ? <span className="bookmark-meta-badge">기본 메타</span> : null}
+        <div className="bookmark-footer-left">
+          <a href={card.url} target="_blank" rel="noreferrer">
+            링크 열기
+          </a>
+        </div>
+
+        <div className="bookmark-footer-right">
+          <span className="bookmark-added-at">추가일: {formatDate(card.addedAt)}</span>
+          {card.metadataStatus === 'fallback' ? (
+            <span className="bookmark-meta-badge">기본 메타</span>
+          ) : null}
+        </div>
       </footer>
     </article>
   )

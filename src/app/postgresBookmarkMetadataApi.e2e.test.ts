@@ -69,4 +69,35 @@ describeIfPostgresE2E('PostgreSQL bookmark metadata api E2E', () => {
     expect(payload.metadata.domain).toBe('this-domain-should-not-resolve.invalid')
     expect(payload.metadata.normalizedUrl).toBe('http://this-domain-should-not-resolve.invalid/path?a=1&b=2')
   })
+
+  it('rejects private target on link check api', async () => {
+    const response = await fetch(
+      `${API_BASE}/api/bookmark/link-check?url=${encodeURIComponent('http://localhost:3000/test')}`,
+    )
+    const payload = (await response.json()) as { ok?: boolean; message?: string }
+
+    expect(response.status).toBe(422)
+    expect(payload.ok).toBe(false)
+  })
+
+  it('returns link check result for unreachable domain with error-like status', async () => {
+    const unreachable = 'http://this-domain-should-not-resolve.invalid/path?x=1'
+    const response = await fetch(`${API_BASE}/api/bookmark/link-check?url=${encodeURIComponent(unreachable)}`)
+    const payload = (await response.json()) as {
+      ok: boolean
+      result: {
+        checkedUrl: string
+        resolvedUrl: string
+        status: 'ok' | 'redirected' | 'blocked' | 'not_found' | 'timeout' | 'error' | 'unknown'
+        statusCode: number | null
+        lastCheckedAt: string
+      }
+    }
+
+    expect(response.status).toBe(200)
+    expect(payload.ok).toBe(true)
+    expect(payload.result.checkedUrl).toContain('this-domain-should-not-resolve.invalid')
+    expect(['timeout', 'error', 'not_found']).toContain(payload.result.status)
+    expect(typeof payload.result.lastCheckedAt).toBe('string')
+  })
 })

@@ -25,6 +25,10 @@ export const toBookmarkUnifiedItem = (card: BookmarkCard, sortIndex: number): Un
       categoryId: card.categoryId,
       sortIndex,
       metadataStatus: card.metadataStatus,
+      linkStatus: card.linkStatus,
+      lastCheckedAt: card.lastCheckedAt,
+      lastStatusCode: card.lastStatusCode,
+      lastResolvedUrl: card.lastResolvedUrl,
     },
   }
 }

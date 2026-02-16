@@ -19,11 +19,22 @@ vi.mock('@features/youtube/services/youtube', () => ({
 vi.mock('@features/bookmark/services/bookmark', () => ({
   parseBookmarkUrl: vi.fn(),
   fetchBookmarkMetadata: vi.fn(),
-  createBookmarkCardFromDraft: vi.fn((draft: Omit<BookmarkCard, 'categoryId' | 'addedAt'>) => ({
+  createBookmarkCardFromDraft: vi.fn(
+    (
+      draft: Omit<
+        BookmarkCard,
+        'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+      >,
+    ) => ({
     ...draft,
     categoryId: 'main',
     addedAt: '2026-02-15T00:00:00.000Z',
-  })),
+    linkStatus: 'unknown',
+    lastCheckedAt: null,
+    lastStatusCode: null,
+    lastResolvedUrl: null,
+  }),
+  ),
 }))
 
 vi.mock('@core/data/adapters/remoteDb', () => ({
@@ -35,6 +46,7 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  checkBookmarkLinkStatus: vi.fn(),
   searchUnifiedItems: vi.fn().mockResolvedValue([]),
   exportUnifiedBackup: vi.fn().mockResolvedValue({
     version: 1,
@@ -118,7 +130,10 @@ const mockYoutubeCard: YouTubeVideoCard = {
   updatedAt: '2026-02-15T00:00:00.000Z',
 }
 
-const mockBookmarkDraft: Omit<BookmarkCard, 'categoryId' | 'addedAt'> = {
+const mockBookmarkDraft: Omit<
+  BookmarkCard,
+  'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+> = {
   id: 'https://openai.com/research',
   url: 'https://openai.com/research',
   normalizedUrl: 'https://openai.com/research',

@@ -18,11 +18,22 @@ vi.mock('@features/youtube/services/youtube', () => ({
 vi.mock('@features/bookmark/services/bookmark', () => ({
   parseBookmarkUrl: vi.fn(),
   fetchBookmarkMetadata: vi.fn(),
-  createBookmarkCardFromDraft: vi.fn((draft: Omit<BookmarkCard, 'categoryId' | 'addedAt'>) => ({
+  createBookmarkCardFromDraft: vi.fn(
+    (
+      draft: Omit<
+        BookmarkCard,
+        'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+      >,
+    ) => ({
     ...draft,
     categoryId: 'main',
     addedAt: '2026-02-15T00:00:00.000Z',
-  })),
+    linkStatus: 'unknown',
+    lastCheckedAt: null,
+    lastStatusCode: null,
+    lastResolvedUrl: null,
+  }),
+  ),
 }))
 
 const { parseBookmarkUrl, fetchBookmarkMetadata } = await import('@features/bookmark/services/bookmark')

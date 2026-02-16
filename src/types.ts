@@ -98,6 +98,15 @@ export type YouTubeDashboardSnapshot = {
   selectedCategoryId: CategoryId
 }
 
+export type BookmarkLinkStatus =
+  | 'unknown'
+  | 'ok'
+  | 'redirected'
+  | 'blocked'
+  | 'not_found'
+  | 'timeout'
+  | 'error'
+
 export type BookmarkCard = {
   id: string
   categoryId: CategoryId
@@ -113,6 +122,10 @@ export type BookmarkCard = {
   addedAt: string
   updatedAt: string
   metadataStatus: 'ok' | 'fallback'
+  linkStatus: BookmarkLinkStatus
+  lastCheckedAt: string | null
+  lastStatusCode: number | null
+  lastResolvedUrl: string | null
 }
 
 export type BookmarkDashboardSnapshot = {

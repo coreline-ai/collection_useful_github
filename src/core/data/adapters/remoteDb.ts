@@ -1,5 +1,6 @@
 import type {
   BookmarkCard,
+  BookmarkLinkStatus,
   BookmarkDashboardSnapshot,
   Category,
   CategoryId,
@@ -42,7 +43,18 @@ export type UnifiedBackupPayload = {
   }
 }
 
-export type BookmarkCardDraft = Omit<BookmarkCard, 'categoryId' | 'addedAt'>
+export type BookmarkCardDraft = Omit<
+  BookmarkCard,
+  'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+>
+
+export type BookmarkLinkCheckResult = {
+  checkedUrl: string
+  resolvedUrl: string
+  status: BookmarkLinkStatus
+  statusCode: number | null
+  lastCheckedAt: string
+}
 
 type ApiResponse<T> = {
   ok: boolean
@@ -398,6 +410,10 @@ const toUnifiedBookmarkItem = (card: BookmarkCard, sortIndex: number): UnifiedIt
     raw: {
       categoryId: card.categoryId,
       metadataStatus: card.metadataStatus,
+      linkStatus: card.linkStatus,
+      lastCheckedAt: card.lastCheckedAt,
+      lastStatusCode: card.lastStatusCode,
+      lastResolvedUrl: card.lastResolvedUrl,
       sortIndex,
       card,
     },
@@ -425,6 +441,21 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
       addedAt: toIso(rawCard.addedAt || item.savedAt),
       updatedAt: toIso(rawCard.updatedAt || item.updatedAt),
       metadataStatus: rawCard.metadataStatus === 'ok' ? 'ok' : 'fallback',
+      linkStatus:
+        rawCard.linkStatus === 'ok' ||
+        rawCard.linkStatus === 'redirected' ||
+        rawCard.linkStatus === 'blocked' ||
+        rawCard.linkStatus === 'not_found' ||
+        rawCard.linkStatus === 'timeout' ||
+        rawCard.linkStatus === 'error'
+          ? rawCard.linkStatus
+          : 'unknown',
+      lastCheckedAt: rawCard.lastCheckedAt ? toIso(rawCard.lastCheckedAt) : null,
+      lastStatusCode:
+        typeof rawCard.lastStatusCode === 'number' && Number.isFinite(rawCard.lastStatusCode)
+          ? Number(rawCard.lastStatusCode)
+          : null,
+      lastResolvedUrl: rawCard.lastResolvedUrl ? String(rawCard.lastResolvedUrl) : null,
     }
   }
 
@@ -447,6 +478,21 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
     addedAt: toIso(item.savedAt),
     updatedAt: toIso(item.updatedAt),
     metadataStatus: item.raw?.metadataStatus === 'ok' ? 'ok' : 'fallback',
+    linkStatus:
+      item.raw?.linkStatus === 'ok' ||
+      item.raw?.linkStatus === 'redirected' ||
+      item.raw?.linkStatus === 'blocked' ||
+      item.raw?.linkStatus === 'not_found' ||
+      item.raw?.linkStatus === 'timeout' ||
+      item.raw?.linkStatus === 'error'
+        ? item.raw.linkStatus
+        : 'unknown',
+    lastCheckedAt: item.raw?.lastCheckedAt ? toIso(item.raw.lastCheckedAt) : null,
+    lastStatusCode:
+      typeof item.raw?.lastStatusCode === 'number' && Number.isFinite(item.raw.lastStatusCode)
+        ? Number(item.raw.lastStatusCode)
+        : null,
+    lastResolvedUrl: typeof item.raw?.lastResolvedUrl === 'string' ? item.raw.lastResolvedUrl : null,
   }
 }
 
@@ -782,6 +828,43 @@ export const fetchBookmarkMetadata = async (url: string): Promise<BookmarkCardDr
     tags: Array.isArray(payload.metadata.tags) ? payload.metadata.tags : [],
     updatedAt: payload.metadata.updatedAt,
     metadataStatus: payload.metadata.metadataStatus === 'ok' ? 'ok' : 'fallback',
+  }
+}
+
+export const checkBookmarkLinkStatus = async (url: string): Promise<BookmarkLinkCheckResult> => {
+  if (!isRemoteSnapshotEnabled()) {
+    throw new Error('원격 DB API가 설정되지 않았습니다.')
+  }
+
+  const response = await requestWithRetry(`/api/bookmark/link-check?url=${encodeURIComponent(url)}`)
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response, '북마크 링크 점검에 실패했습니다.'))
+  }
+
+  const payload = (await response.json()) as ApiResponse<{
+    result: {
+      checkedUrl: string
+      resolvedUrl: string
+      status: BookmarkLinkStatus
+      statusCode: number | null
+      lastCheckedAt: string
+    }
+  }>
+
+  if (!payload.ok || !payload.result) {
+    throw new Error(payload.message || '북마크 링크 점검에 실패했습니다.')
+  }
+
+  return {
+    checkedUrl: payload.result.checkedUrl,
+    resolvedUrl: payload.result.resolvedUrl,
+    status: payload.result.status,
+    statusCode:
+      typeof payload.result.statusCode === 'number' && Number.isFinite(payload.result.statusCode)
+        ? payload.result.statusCode
+        : null,
+    lastCheckedAt: toIso(payload.result.lastCheckedAt),
   }
 }
 

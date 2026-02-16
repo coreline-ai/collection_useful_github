@@ -238,6 +238,10 @@ export const loadBookmarkCards = (): BookmarkCard[] => {
         id: String(card.id),
         normalizedUrl,
         categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+        linkStatus: card.linkStatus ?? 'unknown',
+        lastCheckedAt: card.lastCheckedAt ?? null,
+        lastStatusCode: card.lastStatusCode ?? null,
+        lastResolvedUrl: card.lastResolvedUrl ?? null,
       }
     })
 }

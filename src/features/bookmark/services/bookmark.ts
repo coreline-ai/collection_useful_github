@@ -88,4 +88,8 @@ export const createBookmarkCardFromDraft = (draft: BookmarkCardDraft): BookmarkC
   ...draft,
   categoryId: DEFAULT_MAIN_CATEGORY_ID,
   addedAt: new Date().toISOString(),
+  linkStatus: 'unknown',
+  lastCheckedAt: null,
+  lastStatusCode: null,
+  lastResolvedUrl: null,
 })

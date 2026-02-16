@@ -68,6 +68,10 @@ const migrateCards = (cards: BookmarkCard[], categories: Category[]): BookmarkCa
     ...card,
     normalizedUrl: String(card.normalizedUrl || card.id),
     categoryId: validCategoryIds.has(card.categoryId) ? card.categoryId : DEFAULT_MAIN_CATEGORY_ID,
+    linkStatus: card.linkStatus ?? 'unknown',
+    lastCheckedAt: card.lastCheckedAt ?? null,
+    lastStatusCode: card.lastStatusCode ?? null,
+    lastResolvedUrl: card.lastResolvedUrl ?? null,
   }))
 }
 
@@ -87,6 +91,16 @@ type BookmarkDashboardAction =
   | { type: 'renameCategory'; payload: { categoryId: CategoryId; name: string } }
   | { type: 'deleteCategory'; payload: { categoryId: CategoryId } }
   | { type: 'moveCardToCategory'; payload: { normalizedUrl: string; targetCategoryId: CategoryId } }
+  | {
+      type: 'updateLinkStatus'
+      payload: {
+        normalizedUrl: string
+        linkStatus: BookmarkCard['linkStatus']
+        lastCheckedAt: string | null
+        lastStatusCode: number | null
+        lastResolvedUrl: string | null
+      }
+    }
   | {
       type: 'hydrateDashboard'
       payload: BookmarkDashboardSnapshot
@@ -225,6 +239,22 @@ export const dashboardReducer = (
       return {
         ...state,
         cards,
+      }
+    }
+    case 'updateLinkStatus': {
+      return {
+        ...state,
+        cards: state.cards.map((card) =>
+          card.normalizedUrl === action.payload.normalizedUrl
+            ? {
+                ...card,
+                linkStatus: action.payload.linkStatus,
+                lastCheckedAt: action.payload.lastCheckedAt,
+                lastStatusCode: action.payload.lastStatusCode,
+                lastResolvedUrl: action.payload.lastResolvedUrl,
+              }
+            : card,
+        ),
       }
     }
     case 'hydrateDashboard': {

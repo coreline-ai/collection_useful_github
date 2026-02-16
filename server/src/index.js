@@ -420,6 +420,21 @@ const toBookmarkUnifiedItems = (cards) => {
       addedAt: toIso(card.addedAt || new Date().toISOString()),
       updatedAt: toIso(card.updatedAt || new Date().toISOString()),
       metadataStatus: card.metadataStatus === 'ok' ? 'ok' : 'fallback',
+      linkStatus:
+        card.linkStatus === 'ok' ||
+        card.linkStatus === 'redirected' ||
+        card.linkStatus === 'blocked' ||
+        card.linkStatus === 'not_found' ||
+        card.linkStatus === 'timeout' ||
+        card.linkStatus === 'error'
+          ? card.linkStatus
+          : 'unknown',
+      lastCheckedAt: card.lastCheckedAt ? toIso(card.lastCheckedAt) : null,
+      lastStatusCode:
+        typeof card.lastStatusCode === 'number' && Number.isFinite(card.lastStatusCode)
+          ? Number(card.lastStatusCode)
+          : null,
+      lastResolvedUrl: card.lastResolvedUrl ? String(card.lastResolvedUrl) : null,
     }
 
     return normalizeItem('bookmark', {
@@ -443,6 +458,10 @@ const toBookmarkUnifiedItems = (cards) => {
         categoryId: normalizedCard.categoryId,
         sortIndex: index,
         metadataStatus: normalizedCard.metadataStatus,
+        linkStatus: normalizedCard.linkStatus,
+        lastCheckedAt: normalizedCard.lastCheckedAt,
+        lastStatusCode: normalizedCard.lastStatusCode,
+        lastResolvedUrl: normalizedCard.lastResolvedUrl,
       },
     })
   })
@@ -574,6 +593,21 @@ const mapItemRowToBookmarkCard = (row) => {
       addedAt: toIso(card.addedAt || row.savedAt),
       updatedAt: toIso(card.updatedAt || row.updatedAt),
       metadataStatus: card.metadataStatus === 'ok' ? 'ok' : 'fallback',
+      linkStatus:
+        card.linkStatus === 'ok' ||
+        card.linkStatus === 'redirected' ||
+        card.linkStatus === 'blocked' ||
+        card.linkStatus === 'not_found' ||
+        card.linkStatus === 'timeout' ||
+        card.linkStatus === 'error'
+          ? card.linkStatus
+          : 'unknown',
+      lastCheckedAt: card.lastCheckedAt ? toIso(card.lastCheckedAt) : null,
+      lastStatusCode:
+        typeof card.lastStatusCode === 'number' && Number.isFinite(card.lastStatusCode)
+          ? Number(card.lastStatusCode)
+          : null,
+      lastResolvedUrl: card.lastResolvedUrl ? String(card.lastResolvedUrl) : null,
     }
   }
 
@@ -593,6 +627,21 @@ const mapItemRowToBookmarkCard = (row) => {
     addedAt: toIso(row.savedAt),
     updatedAt: toIso(row.updatedAt),
     metadataStatus: raw.metadataStatus === 'ok' ? 'ok' : 'fallback',
+    linkStatus:
+      raw.linkStatus === 'ok' ||
+      raw.linkStatus === 'redirected' ||
+      raw.linkStatus === 'blocked' ||
+      raw.linkStatus === 'not_found' ||
+      raw.linkStatus === 'timeout' ||
+      raw.linkStatus === 'error'
+        ? raw.linkStatus
+        : 'unknown',
+    lastCheckedAt: raw.lastCheckedAt ? toIso(raw.lastCheckedAt) : null,
+    lastStatusCode:
+      typeof raw.lastStatusCode === 'number' && Number.isFinite(raw.lastStatusCode)
+        ? Number(raw.lastStatusCode)
+        : null,
+    lastResolvedUrl: raw.lastResolvedUrl ? String(raw.lastResolvedUrl) : null,
   }
 }
 
@@ -1429,6 +1478,92 @@ const fetchBookmarkHtmlWithRedirect = async (targetUrl) => {
   throw error
 }
 
+const classifyBookmarkLinkStatus = (statusCode, redirected) => {
+  if (statusCode >= 200 && statusCode < 300) {
+    return redirected ? 'redirected' : 'ok'
+  }
+
+  if (statusCode === 404) {
+    return 'not_found'
+  }
+
+  if (statusCode === 401 || statusCode === 403) {
+    return 'blocked'
+  }
+
+  return 'error'
+}
+
+const checkBookmarkLinkWithRedirect = async (targetUrl) => {
+  const userAgent = 'useful-git-info-bookmark-bot/1.0 (+https://github.com/coreline-ai/collection_useful_github)'
+  let currentUrl = targetUrl
+  let redirectCount = 0
+
+  for (; redirectCount <= 3; redirectCount += 1) {
+    await assertBookmarkUrlSafe(currentUrl)
+
+    let response
+    try {
+      response = await fetchWithTimeout(currentUrl, bookmarkFetchTimeoutMs, {
+        redirect: 'manual',
+        method: 'GET',
+        headers: {
+          'User-Agent': userAgent,
+          Accept: 'text/html,application/xhtml+xml,*/*;q=0.8',
+        },
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return {
+          status: 'timeout',
+          statusCode: null,
+          resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+        }
+      }
+
+      return {
+        status: 'error',
+        statusCode: null,
+        resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+      }
+    }
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      if (redirectCount === 3) {
+        return {
+          status: 'error',
+          statusCode: response.status,
+          resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+        }
+      }
+
+      const location = response.headers.get('location')
+      if (!location) {
+        return {
+          status: 'error',
+          statusCode: response.status,
+          resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+        }
+      }
+
+      currentUrl = new URL(location, currentUrl).toString()
+      continue
+    }
+
+    return {
+      status: classifyBookmarkLinkStatus(response.status, redirectCount > 0),
+      statusCode: response.status,
+      resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+    }
+  }
+
+  return {
+    status: 'error',
+    statusCode: null,
+    resolvedUrl: normalizeBookmarkUrl(currentUrl)?.normalizedUrl || currentUrl,
+  }
+}
+
 const buildBookmarkFallbackMetadata = (normalizedUrl, domain, updatedAt) => ({
   url: normalizedUrl,
   normalizedUrl,
@@ -1441,6 +1576,34 @@ const buildBookmarkFallbackMetadata = (normalizedUrl, domain, updatedAt) => ({
   tags: [],
   metadataStatus: 'fallback',
   updatedAt,
+})
+
+app.get('/api/bookmark/link-check', async (req, res, next) => {
+  try {
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url : ''
+    const normalized = normalizeBookmarkUrl(rawUrl)
+
+    if (!normalized) {
+      const error = new Error('유효한 URL(http/https)을 입력해 주세요.')
+      error.status = 400
+      throw error
+    }
+
+    const result = await checkBookmarkLinkWithRedirect(normalized.normalizedUrl)
+
+    res.json({
+      ok: true,
+      result: {
+        checkedUrl: normalized.normalizedUrl,
+        resolvedUrl: result.resolvedUrl,
+        status: result.status,
+        statusCode: result.statusCode,
+        lastCheckedAt: new Date().toISOString(),
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
 })
 
 app.get('/api/health', async (_req, res, next) => {

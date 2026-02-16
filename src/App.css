@@ -797,23 +797,6 @@
   -webkit-line-clamp: 3;
 }
 
-.bookmark-meta-line {
-  margin-top: 0.75rem;
-}
-
-.bookmark-favicon-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.bookmark-favicon {
-  width: 14px;
-  height: 14px;
-  object-fit: contain;
-  border-radius: 2px;
-}
-
 .bookmark-meta-badge {
   display: inline-flex;
   align-items: center;
@@ -824,6 +807,103 @@
   font-weight: 700;
   background: var(--color-surface-soft-accent-2);
   color: var(--text-subtle);
+}
+
+.bookmark-tools-bar {
+  margin: 0 0 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  padding: 0.68rem 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.bookmark-tool-button {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  color: var(--text-main);
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 0.36rem 0.65rem;
+}
+
+.bookmark-tool-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bookmark-duplicate-count {
+  font-size: 0.78rem;
+  color: var(--text-subtle);
+  font-weight: 700;
+}
+
+.bookmark-duplicate-panel {
+  margin: 0 0 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-2);
+  padding: 0.8rem;
+}
+
+.bookmark-duplicate-panel h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-main);
+}
+
+.bookmark-duplicate-list {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.bookmark-duplicate-item {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-1);
+  padding: 0.58rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.bookmark-duplicate-item p {
+  margin: 0.2rem 0 0;
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+}
+
+.bookmark-duplicate-primary {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.bookmark-footer-left,
+.bookmark-footer-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.bookmark-footer-right {
+  margin-left: auto;
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.bookmark-added-at {
+  color: var(--text-subtle);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .youtube-title {
@@ -1460,6 +1540,17 @@
   .repo-card-footer {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .bookmark-footer-right {
+    margin-left: 0;
+    align-self: flex-end;
+    justify-content: flex-end;
+  }
+
+  .bookmark-tools-bar,
+  .bookmark-duplicate-item {
+    align-items: stretch;
   }
 
 }

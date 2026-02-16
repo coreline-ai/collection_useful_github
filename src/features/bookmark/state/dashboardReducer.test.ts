@@ -17,6 +17,10 @@ const baseCard = (overrides: Partial<BookmarkCard> = {}): BookmarkCard => ({
   addedAt: '2026-02-16T00:00:00.000Z',
   updatedAt: '2026-02-16T00:00:00.000Z',
   metadataStatus: 'ok',
+  linkStatus: 'unknown',
+  lastCheckedAt: null,
+  lastStatusCode: null,
+  lastResolvedUrl: null,
   ...overrides,
 })
 
@@ -70,6 +74,26 @@ describe('bookmark dashboardReducer', () => {
     })
 
     expect(next.cards[0].categoryId).toBe('bookmark_category_x')
+  })
+
+  it('updates card link status', () => {
+    let state = initialState()
+    state = dashboardReducer(state, { type: 'addCard', payload: baseCard() })
+
+    const next = dashboardReducer(state, {
+      type: 'updateLinkStatus',
+      payload: {
+        normalizedUrl: 'https://example.com/a',
+        linkStatus: 'redirected',
+        lastCheckedAt: '2026-02-16T12:00:00.000Z',
+        lastStatusCode: 301,
+        lastResolvedUrl: 'https://example.com/a?ref=canonical',
+      },
+    })
+
+    expect(next.cards[0].linkStatus).toBe('redirected')
+    expect(next.cards[0].lastStatusCode).toBe(301)
+    expect(next.cards[0].lastResolvedUrl).toBe('https://example.com/a?ref=canonical')
   })
 
   it('deletes custom category and moves its cards to warehouse', () => {

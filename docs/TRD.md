@@ -1,137 +1,216 @@
-# TRD: GitHub 카드 대시보드
+# TRD: Unified Knowledge Cardboard
+
+업데이트 기준: 2026-02-16
 
 ## 1. 기술 스택
-- Frontend: React 19 + TypeScript + Vite
-- 상태 관리: `useReducer` + local state/hooks
-- 저장: `localStorage`
-- 테스트: Vitest + Testing Library
 
-## 2. 주요 모듈 구조
-- `client/src/services/github.ts`
-  - GitHub API 호출
-  - 저장소 정보/README/활동 조회
-  - 최신 커밋 SHA 조회 함수 제공
-- `client/src/services/translation.ts`
-  - 수동 번역 요청(버튼 트리거 시)
-  - GLM 우선, OpenAI fallback
-- `client/src/storage/localStorage.ts`
-  - 카드/메모/카테고리/테마 저장
-- `client/src/storage/detailCache.ts`
-  - 상세 캐시 저장/조회/TTL 정리
-- `client/src/features/youtube/services/youtube.ts`
-  - YouTube URL 파서(`watch/youtu.be/shorts`)
-  - 서버 경유 YouTube 메타 조회
-- `client/src/features/youtube/state/dashboardReducer.ts`
-  - YouTube 카드/카테고리/페이지네이션 상태 관리
-- `client/src/features/youtube/entry.tsx`
-  - YouTube 보드 UI(추가/검색/카테고리/카드)
-- `client/src/utils/theme.ts`
-  - OS 다크모드 감지
-  - 저장값 + 시스템값 기반 초기 테마 결정
-- `client/src/components/RepoDetailModal.tsx`
-  - 상세 탭 UI
-  - 수동 번역 버튼/원문 토글
-  - 업데이트 확인/최신 갱신 버튼
+- Frontend: React 19, TypeScript, Vite 7
+- Backend: Node.js(ESM) + Express 4
+- Database: PostgreSQL 16 (`pg`)
+- Testing: Vitest + Testing Library + Postgres E2E
 
-## 3. 데이터 모델
-### 3.1 카드
-```ts
-GitHubRepoCard {
-  id, owner, repo, fullName, description, summary,
-  htmlUrl, homepage, language,
-  stars, forks, watchers, openIssues,
-  topics, license, defaultBranch,
-  createdAt, updatedAt, addedAt
-}
+## 2. 시스템 구성
+
+- UI Shell: `src/app/AppShell.tsx`
+- Feature Modules:
+  - `src/features/github`
+  - `src/features/youtube`
+  - `src/features/bookmark`
+  - `src/features/unified-search`
+- Core Data Adapter: `src/core/data/adapters/remoteDb.ts`
+- API Server: `server/src/index.js`
+- DB Schema: `server/db/schema.sql`
+
+## 3. 코드 레벨 구조
+
+## 3.1 AppShell 레이어
+
+책임:
+
+- 탭 전환 상태(`TopSection`) 관리
+- 테마 상태(`ThemeMode`) 관리
+- 초기 데이터 마이그레이션 실행
+- feature 별 sync badge 상태 연결
+
+비책임:
+
+- 카드 추가/삭제/검색 로직
+- provider별 상세 상태 관리
+
+## 3.2 Feature Entry 패턴
+
+각 Entry(`github/youtube/bookmark`)는 동일 패턴을 가진다.
+
+- `useReducer`로 대시보드 상태 관리
+- `remoteEnabled` 시 원격 hydrate 실행
+- 저장 시 원격 우선, 실패 시 localStorage fallback
+- transient 실패 누적 후 `local` 전환
+- 주기적 자동 복구(recovery loop)
+
+공통 상수(`src/constants.ts`):
+
+- `REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK = 3`
+- `REMOTE_SYNC_RECOVERY_INTERVAL_MS = 10000`
+- `REMOTE_SYNC_RECOVERED_BADGE_MS = 4000`
+
+## 3.3 상태 모델
+
+타입 파일: `src/types.ts`
+
+핵심 타입:
+
+- `GitHubRepoCard`
+- `YouTubeVideoCard`
+- `BookmarkCard`
+- `Category`
+- `UnifiedItem`
+- `SyncConnectionStatus`
+
+`BookmarkCard` 추가 필드:
+
+- `metadataStatus`: 메타 추출 신뢰도
+- `linkStatus`, `lastCheckedAt`, `lastStatusCode`, `lastResolvedUrl`: 링크 점검 결과 저장용
+
+## 3.4 통합 데이터 계층
+
+저장 대상 테이블:
+
+- `unified_items`
+- `unified_notes`
+- `unified_meta`
+
+보드별 대시보드 API:
+
+- `GET/PUT /api/github/dashboard`
+- `GET/PUT /api/youtube/dashboard`
+- `GET/PUT /api/bookmark/dashboard`
+
+Legacy 호환 API:
+
+- `PUT /api/providers/:provider/snapshot`
+- `GET /api/providers/:provider/items`
+- `GET /api/items/:id`
+
+## 4. PostgreSQL 스키마/인덱스
+
+파일: `server/db/schema.sql`
+
+확장:
+
+- `pg_trgm`
+- `unaccent`
+
+테이블:
+
+- `unified_items`: 통합 콘텐츠 본문
+- `unified_notes`: 노트
+- `unified_meta`: 대시보드/메타
+
+검색 인덱스:
+
+- trigram GIN: `title/summary/description/author/native_id(lower)`
+- FTS GIN: 가중치 결합 `title/native_id(A), summary/author(B), description/tags(C)`
+- 보조 정렬 인덱스: provider/type/status + updated_at
+
+## 5. 검색 엔진 설계
+
+엔드포인트: `GET /api/search`
+
+모드:
+
+- `legacy`: ILIKE 기반
+- `relevance`(기본): 하이브리드 랭킹
+
+신호:
+
+- exact
+- prefix
+- fts
+- trgm
+- recency
+
+랭킹 수식:
+
+```text
+score = exact*5.0 + prefix*2.5 + fts_rank*1.8 + trgm_similarity*1.2 + recency*0.4
 ```
 
-### 3.2 상세
-```ts
-RepoDetailData {
-  readmePreview: string | null
-  recentActivity: RepoActivityItem[]
-  latestCommitSha?: string | null
-}
-```
+옵션 파라미터:
 
-### 3.3 상세 캐시
-```ts
-RepoDetailCacheEntry {
-  repoId: string
-  cachedAt: string
-  detail: RepoDetailData
-}
-```
+- `provider`, `type`, `limit`
+- `mode`, `fuzzy`, `prefix`, `min_score`
 
-### 3.4 테마
-```ts
-ThemeMode = 'light' | 'dark'
-```
+rate limit:
 
-- 저장 키: `github_theme_mode_v1`
-- 초기 로딩:
-  1. 저장값 확인
-  2. 저장값 없으면 `matchMedia('(prefers-color-scheme: dark)')` 확인
-  3. 최종값을 `document.documentElement.dataset.theme`에 반영
+- IP 기준 `60 req / 60 sec`
 
-## 4. 캐시 아키텍처
-- 저장 키: `github_repo_detail_cache_v1`
-- TTL: `DETAIL_CACHE_TTL_HOURS = 24`
-- 로딩 순서:
-  1. 모달 열림
-  2. cache hit -> 즉시 렌더
-  3. cache miss -> 원격 상세 조회 후 캐시 저장
-- 수동 갱신:
-  1. `업데이트 확인` -> `fetchLatestCommitSha()` 호출
-  2. 캐시 SHA와 비교
-  3. 다르면 `최신 데이터 불러오기` 노출
+클라이언트 최적화(`useUnifiedSearchState`):
 
-## 5. API 정책
-- GitHub 헤더
-  - `Accept: application/vnd.github+json`
-  - `Authorization: Bearer ${VITE_GITHUB_TOKEN}` (옵션)
-- 타임아웃
-  - `VITE_GITHUB_TIMEOUT_SECONDS` (기본 12초)
-- 환경변수
-  - `VITE_GITHUB_TOKEN`
-  - `VITE_GITHUB_TIMEOUT_SECONDS`
-  - `GLM_API_KEY`, `GLM_BASE_URL`, `GLM_MODEL`, `GLM_TIMEOUT_SECONDS`
-  - `VITE_OPENAI_API_KEY`, `VITE_OPENAI_MODEL`, `VITE_OPENAI_TIMEOUT_SECONDS`
-  - `YOUTUBE_API_KEY` (server)
-  - `YOUTUBE_API_TIMEOUT_SECONDS` (server)
+- 최근검색 localStorage(최대 20)
+- 결과 캐시 Map TTL 60초 + LRU 50개
 
-### YouTube 서버 API
+## 6. Bookmark 메타 추출 설계
+
+엔드포인트:
+
+- `GET /api/bookmark/metadata?url=...`
+- `GET /api/bookmark/link-check?url=...`
+
+보안/안정성:
+
+- URL 스킴 검증(`http/https`)
+- 자격증명 포함 URL 거부
+- localhost/private 대역 차단(SSRF 방어)
+- redirect 최대 3회
+- timeout/응답 바이트 제한
+- non-html fallback
+
+추출 우선순위:
+
+- title: og > twitter > title
+- excerpt: og desc > meta desc > first paragraph
+- canonical/image/URL 정규화
+
+## 7. YouTube 메타 설계
+
+엔드포인트:
+
 - `GET /api/youtube/videos/:videoId`
-  - YouTube Data API v3 조회 후 카드 메타 반환
-- `GET /api/youtube/dashboard`
-  - YouTube 탭 카드/카테고리 스냅샷 로드
-- `PUT /api/youtube/dashboard`
-  - YouTube 탭 카드/카테고리 스냅샷 저장
 
-## 6. 번역 동작
-- 자동 번역 없음
-- 탭별 버튼 클릭 시 호출
-  - 개요: description + summary
-  - README: markdown 본문
-  - Activity: title 목록
-- 토글 방식: 번역 결과 <-> 원문
+동작:
 
-## 7. 오류 처리
-- GitHub 403 rate limit 발생 시 안내 메시지 노출
-- 상세 API 3종(readme/commits/issues) 전부 실패 시 상세 에러 표출
-- README가 없으면 안내 문구 표출
+- YouTube Data API v3 `videos?part=snippet,statistics`
+- quota/timeout/not found 메시지 분기
+- `thumbnail`, `viewCount`, `likeCount` 매핑
 
-## 8. 테스트 범위
-- URL 파서/페이지네이션/리듀서 단위 테스트
-- 마크다운 렌더 및 sanitize 테스트
-- 번역 서비스 fallback 테스트
-- App 통합 테스트(등록/중복/상세/메모)
-- YouTube 통합 테스트(탭 전환/영상 추가/로컬검색/카테고리)
-- 테마 유틸 단위 테스트(저장값 우선/OS 감지)
-- 테마 저장 유틸 테스트(localStorage 손상값 fallback)
-- Postgres E2E(YouTube 카드 추가 후 `provider='youtube'` 영속화 검증)
+## 8. 번역 설계
 
-## 9. 운영 가이드
-- Rate limit 완화를 위해 `VITE_GITHUB_TOKEN` 설정 권장
-- 키 노출 시 즉시 rotate
-- 캐시 문제 확인 시 `localStorage`에서 관련 키 삭제 후 재실행
+파일: `src/services/translation.ts`
+
+정책:
+
+- 자동 번역 없음, 버튼 트리거 수동 번역만
+- GLM 우선, OpenAI fallback
+- 배치 번역(JSON 응답 파싱)
+- markdown 번역 시 구조 보존 지시
+
+## 9. 테스트 전략
+
+단위/통합:
+
+- reducers, parsers, mapping, storage, markdown, theme
+- App/AppShell 탭 전환 및 회귀
+- unified-search state/cache/recent queries
+
+Postgres E2E:
+
+- `src/app/postgres*.e2e.test.ts(x)`
+- 실행 스크립트: `npm run test:e2e:postgres`
+- 전용 DB/포트 가드로 메인 DB 오염 방지
+
+## 10. 운영 리스크와 대응
+
+- CORS 불일치: `CORS_ORIGIN` 다중 포트 허용
+- 원격 장애: local fallback + recovered 배지
+- 검색 부하: SQL 인덱스 + API rate limit
+- 북마크 크롤링 리스크: timeout/byte limit/SSRF 차단

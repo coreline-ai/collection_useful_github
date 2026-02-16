@@ -21,6 +21,7 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   saveYoutubeDashboardToRemote: vi.fn().mockResolvedValue(undefined),
   loadBookmarkDashboardFromRemote: vi.fn().mockResolvedValue(null),
   saveBookmarkDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  checkBookmarkLinkStatus: vi.fn(),
 }))
 
 describe('AppShell', () => {

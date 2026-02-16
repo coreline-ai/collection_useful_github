@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  checkBookmarkLinkStatus,
   fetchBookmarkMetadata,
   isRemoteSnapshotEnabled,
   loadBookmarkDashboardFromRemote,
@@ -184,6 +185,30 @@ describe('remoteDb adapter', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/bookmark/metadata?url=')
     expect(metadata.normalizedUrl).toBe('https://example.com/post')
     expect(metadata.metadataStatus).toBe('ok')
+  })
+
+  it('checks bookmark link status from remote api', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        result: {
+          checkedUrl: 'https://example.com/post',
+          resolvedUrl: 'https://example.com/post',
+          status: 'ok',
+          statusCode: 200,
+          lastCheckedAt: '2026-02-16T00:00:00.000Z',
+        },
+      }),
+    )
+
+    const result = await checkBookmarkLinkStatus('https://example.com/post')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/bookmark/link-check?url=')
+    expect(result.status).toBe('ok')
+    expect(result.statusCode).toBe(200)
   })
 
   it('forwards relevance search options to api query params', async () => {

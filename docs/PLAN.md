@@ -1,148 +1,53 @@
-## GitHub 카드 대시보드 구현 계획 (React + Vite, localStorage)
+# PLAN: 현재 구현 상태 + 다음 실행 계획
 
-### 요약
-사용자가 GitHub 저장소 URL을 입력하면 저장소 정보를 카드로 생성하고, 4열 그리드로 표시합니다. 페이지당 12개를 노출하며 12개 초과 시 숫자 페이지네이션(이전/다음 포함)을 제공합니다. 카드에는 핵심 정보와 요약, 링크, 인기도 지표를 표시하고, 클릭 시 GitHub 스타일에 가까운 상세 메타 팝업 + 하단 메모 입력/기록 영역을 제공합니다. 카드 삭제 기능과 상태 영속화(localStorage)를 포함합니다.
+업데이트 기준: 2026-02-16
 
-### 범위
-1. 포함 범위: 저장소 URL 입력, 카드 생성/조회/삭제, 4열 그리드, 페이지네이션, 상세 팝업, 메모 작성/목록, 로컬 저장.
-2. 제외 범위: 서버 구축, 사용자 계정 로그인, 다중 디바이스 동기화, 조직/사용자 전체 URL 일괄 수집.
+## 1. 현재 구현 상태(코드 기준)
 
-### 기술/구조 결정
-1. 프레임워크: `React + Vite`.
-2. 언어: `TypeScript`로 고정.
-3. 상태 관리: `useReducer + custom hooks`.
-4. 데이터 저장: `localStorage`.
-5. 정렬: `입력 순서 유지` (최신 추가가 목록 하단).
-6. URL 정책: `owner/repo` 단위만 허용, 중복 저장소 차단.
-7. 페이지 UI: `숫자 페이지 + 이전/다음`.
-8. GitHub 인증: 기본 무인증 호출, `VITE_GITHUB_TOKEN` 있으면 자동 사용(옵션 지원).
+### 완료
 
-### 공개 인터페이스/타입(중요)
-1. `GitHubRepoCard`
-```ts
-type GitHubRepoCard = {
-  id: string; // full_name lower-case, e.g. "facebook/react"
-  owner: string;
-  repo: string;
-  fullName: string;
-  description: string;
-  summary: string;
-  htmlUrl: string;
-  homepage: string | null;
-  language: string | null;
-  stars: number;
-  forks: number;
-  watchers: number;
-  openIssues: number;
-  topics: string[];
-  license: string | null;
-  defaultBranch: string;
-  createdAt: string;
-  updatedAt: string;
-  addedAt: string; // 입력 시각 (정렬 기준)
-};
-```
-2. `RepoNote`
-```ts
-type RepoNote = {
-  id: string;
-  repoId: string; // GitHubRepoCard.id
-  content: string;
-  createdAt: string;
-};
-```
-3. 저장 키
-- `localStorage["github_cards_v1"]`: `GitHubRepoCard[]`
-- `localStorage["github_notes_v1"]`: `Record<string, RepoNote[]>`
-4. 핵심 함수 시그니처
-- `parseGitHubRepoUrl(input: string): { owner: string; repo: string } | null`
-- `fetchRepo(owner: string, repo: string): Promise<GitHubRepoCard>`
-- `fetchReadme(owner: string, repo: string): Promise<string | null>`
-- `buildSummary(description: string, readme: string | null): string`
-- `paginate<T>(items: T[], page: number, perPage: number): T[]`
+- 글로벌 탭 분리: `통합검색/깃허브/유튜브/북마크`
+- 보드 3종 실동작:
+  - GitHub: 추가/카테고리/상세/메모/번역
+  - YouTube: 추가/카테고리/검색/링크 중심 카드
+  - Bookmark: 추가/카테고리/검색/중복 정리 도우미
+- 원격 저장(PostgreSQL) + 로컬 fallback + 자동 복구
+- 통합검색 relevance 모드(FTS + prefix + trigram + recency)
+- 백업 내보내기/복원
+- 테마(light/dark) + 동기화 상태 배지
+- Postgres E2E 스크립트 분리
 
-### UI/화면 사양
-1. 상단 입력 바
-- URL 입력창 + `추가` 버튼 + 엔터 제출.
-- 유효성 실패 시 인라인 에러 표시.
-2. 카드 그리드
-- 데스크톱: 4열 고정.
-- 카드 정보: 저장소명, owner, 요약, 언어, stars/forks/watchers/open issues, 업데이트일, GitHub 링크.
-- 카드 액션: `상세 보기`, `삭제`.
-3. 페이지네이션
-- `perPage = 12`.
-- 13개부터 새 페이지 생성.
-- 숫자 버튼 + 이전/다음.
-- 삭제 후 현재 페이지가 비면 이전 페이지로 자동 이동.
-4. 상세 팝업(모달)
-- 핵심 메타 정보 표시: 저장소명, 설명, stars/forks/watchers/issues, language, topics, license, default branch, created/updated, GitHub 링크/homepage.
-- 하단 메모 섹션: 텍스트 입력 + `입력` 버튼.
-- 입력 시 즉시 하단 리스트에 누적 표시(시간 포함).
-5. 반응형
-- 태블릿/모바일에서는 열 수를 줄이되, 데스크톱에서 4열 요구 보장.
+### 주의
 
-### 데이터 흐름
-1. 사용자 URL 입력.
-2. URL 파싱/검증 후 중복 검사(`id = owner/repo lower-case`).
-3. GitHub API 호출로 저장소 메타 획득.
-4. README 일부(가능 시) + description 기반 규칙 요약 생성.
-5. 카드 상태 반영 후 `localStorage` 동기화.
-6. 카드 클릭 시 모달 오픈, 메모 입력/조회/저장.
-7. 카드 삭제 시 카드 + 연결 메모 동시 삭제, 페이지 보정.
+- 북마크 `link-check` API는 서버에 존재하지만, 현재 카드 UI에서는 점검 버튼을 노출하지 않음
+- 북마크 중복 정리 정확도는 `resolved/canonical/content` 휴리스틱에 의존
 
-### GitHub API 연동 상세
-1. 저장소 정보: `GET /repos/{owner}/{repo}`.
-2. README: `GET /repos/{owner}/{repo}/readme` (base64 decode).
-3. 헤더
-- `Accept: application/vnd.github+json`
-- `Authorization: Bearer ${VITE_GITHUB_TOKEN}` (환경변수 있을 때만)
-4. 요약 규칙
-- description 우선.
-- README 첫 본문 단락/헤더 기반 핵심 문장 1~2개 추출.
-- 최종 180~220자 내로 절삭.
-5. 실패 처리
-- README 실패 시 description-only 요약으로 폴백.
-- 404/403/rate limit 메시지 분기 출력.
+## 2. 단기 우선순위
 
-### 엣지 케이스/실패 모드
-1. URL 변형 처리: `https://github.com/owner/repo`, `github.com/owner/repo`, trailing slash, query 제거.
-2. 중복 입력 차단: 기존 카드면 “이미 추가됨” 안내.
-3. 비공개/없는 저장소: 카드 생성 실패 + 오류 안내.
-4. API 제한 초과: 토큰 설정 유도 메시지 표시.
-5. 메모 공백 입력 차단, 최대 길이(예: 500자) 제한.
-6. XSS 방지: 메모/요약은 plain text 렌더링.
+1. Bookmark 중복 정리 UX 고도화
+- 병합 전 diff 미리보기
+- 병합 후 undo(단일 스텝)
 
-### 테스트 케이스/시나리오
-1. URL 파서 단위 테스트
-- 정상 URL 5종, 비정상 URL 5종.
-2. 카드 생성 플로우
-- 유효 URL 입력 시 카드 생성 + localStorage 저장.
-- 중복 입력 시 생성 차단.
-3. 페이지네이션
-- 12개까지 1페이지, 13개부터 2페이지.
-- 삭제 시 페이지 보정 동작 확인.
-4. 모달/메모
-- 카드 클릭 시 모달 오픈.
-- 메모 입력 후 즉시 렌더 + 새로고침 후 유지.
-5. API 에러 처리
-- 404, 403, 네트워크 오류, README 없는 저장소.
-6. 반응형/레이아웃
-- 데스크톱 4열 고정 확인.
-- 모바일 열 감소 및 사용성 확인.
+2. 통합검색 결과 UX 고도화
+- score/matchedBy 디버그 표시 토글
+- 필터 preset 저장
 
-### 구현 단계(작업 순서)
-1. Vite React TS 프로젝트 초기화 및 폴더 구조 확정.
-2. 도메인 타입/스토리지 유틸/URL 파서 구현.
-3. GitHub API 클라이언트 + 요약 생성기 구현.
-4. 입력 바 + 카드 그리드 + 카드 컴포넌트 구현.
-5. 페이지네이션 컴포넌트 구현.
-6. 상세 모달 + 메모 입력/리스트 구현.
-7. 삭제/중복/오류 상태 UX 마감.
-8. 테스트 작성(단위 + 통합) 및 수동 시나리오 검증.
+3. 운영 가시성 강화
+- `/api/metrics` 또는 내부 로깅 집계
+- 검색 latency / fallback 발생률 대시보드화
 
-### 명시적 가정/기본값
-1. 레포가 비어 있으므로 신규 웹 앱을 `React + Vite + TypeScript`로 시작한다.
-2. 저장소 목록 정렬은 인기도가 아니라 사용자 선택대로 `입력 순서 유지`를 적용한다.
-3. 상세 팝업은 “핵심 메타 중심”으로 제한하고, 커밋/릴리즈/기여자까지는 포함하지 않는다.
-4. 백엔드는 만들지 않고, 영속화는 브라우저 localStorage만 사용한다.
-5. GitHub 토큰은 필수가 아니며, 있으면 자동 활용하는 옵션 설계로 간다.
+## 3. 테스트/품질 체크리스트
+
+- `npm run lint`
+- `npm test`
+- `npm run build`
+- `npm run test:e2e:postgres`
+
+모든 변경은 위 4개를 기본 게이트로 유지.
+
+## 4. 변경 시 규칙
+
+- feature 간 직접 import 금지
+- 공유 타입/유틸은 `shared` 또는 `core`로 이동
+- 원격 실패 메시지 문구는 행동 유도형으로 유지
+- 데이터 손실 가능 변경 시 반드시 마이그레이션 경로 문서화
