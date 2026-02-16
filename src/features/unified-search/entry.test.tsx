@@ -29,6 +29,20 @@ describe('UnifiedSearchFeatureEntry', () => {
     expect(screen.getByText('검색어를 입력해 주세요.')).toBeInTheDocument()
   })
 
+  it('renders search method summary section', () => {
+    render(<UnifiedSearchFeatureEntry />)
+
+    expect(screen.getByRole('heading', { name: '검색 방식 요약' })).toBeInTheDocument()
+    expect(screen.getByText(/FTS\(Full-Text Search, 전문 검색\)/)).toBeInTheDocument()
+  })
+
+  it('renders backup tooltips', () => {
+    render(<UnifiedSearchFeatureEntry />)
+
+    expect(screen.getByText('현재 통합 데이터를 JSON 파일로 내려받습니다.')).toBeInTheDocument()
+    expect(screen.getByText('백업 JSON 파일을 업로드해 데이터를 복원합니다.')).toBeInTheDocument()
+  })
+
   it('shows guide when remote db is disabled', () => {
     render(<UnifiedSearchFeatureEntry />)
 

@@ -1,27 +1,25 @@
-# GitHub Card Dashboard
+# Useful Git Info
 
 <p align="left">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" />
-  <img alt="Vite" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" />
+  <img alt="Vite 7" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" />
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white" />
   <img alt="Vitest" src="https://img.shields.io/badge/Tested_with-Vitest-6E9F18?logo=vitest&logoColor=white" />
 </p>
 
-GitHub 저장소 URL을 입력하면 카드형 보드로 수집/분류하고, 상세 팝업에서 `개요 / README / Activity / 메모`를 확인하는 웹앱입니다.  
-카테고리(메인/창고/사용자 카테고리), 상세 캐시, 수동 번역, 라이트/다크(순수 블랙) 테마를 제공합니다.
+GitHub 저장소를 카드보드로 수집/분류하고, 통합검색으로 `github / youtube / bookmark` 데이터를 하나의 스키마로 조회하는 React + PostgreSQL 프로젝트입니다.
 
-## Table of Contents
+## 목차
 
 - [핵심 기능](#핵심-기능)
-- [기술 스택](#기술-스택)
+- [아키텍처](#아키텍처)
+- [통합검색 방식](#통합검색-방식)
 - [빠른 시작](#빠른-시작)
 - [환경 변수](#환경-변수)
-- [동작 규칙](#동작-규칙)
-- [테마 시스템](#테마-시스템)
-- [캐시 전략](#캐시-전략)
-- [번역 전략](#번역-전략)
-- [저장소 구조](#저장소-구조)
 - [데이터 모델](#데이터-모델)
+- [프로젝트 구조](#프로젝트-구조)
+- [API 요약](#api-요약)
 - [스크립트](#스크립트)
 - [테스트](#테스트)
 - [트러블슈팅](#트러블슈팅)
@@ -29,204 +27,233 @@ GitHub 저장소 URL을 입력하면 카드형 보드로 수집/분류하고, �
 
 ## 핵심 기능
 
-### 1) 저장소 등록
-- 입력 형식 지원:
-  - `owner/repo`
-  - `https://github.com/owner/repo`
-  - `github.com/owner/repo`
-- 중복 등록 차단
-- 유효하지 않은 URL/접근 불가/요청 제한 등 에러 메시지 분기 처리
+### 1) 글로벌 탭
+- 최상단 탭 순서: `통합검색 > 깃허브 > 유튜브 > 북마크`
+- 마지막 선택 탭은 `top_section_v1`로 복원
+- `통합검색`은 탭 전용 화면으로 독립 분리
 
-### 2) 카드 보드
-- 데스크톱 4열 그리드
-- 페이지당 12개 노출 + 숫자 페이지네이션 + 이전/다음
-- 카드 표시 항목:
-  - 저장소명, owner
-  - Summary(3줄 clamp)
-  - 언어, 업데이트일
-  - Stars, Forks
-  - GitHub 링크, 상세 보기
+### 2) GitHub 보드
+- URL 입력으로 카드 생성 (`owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`)
+- 데스크톱 4열, 페이지당 12개, 페이지네이션 지원
+- 기본 카테고리: `메인(main)`, `창고(warehouse)` 자동 생성
+- 사용자 카테고리 생성/이름변경/삭제, 카드 이동(단일 소속)
+- 메인 카테고리에서만 신규 저장소 추가 가능
 
-### 3) 카테고리 시스템
-- 기본 카테고리 자동 생성:
-  - `메인(main)` / `창고(warehouse)`
-- 사용자 카테고리 생성/이름변경/삭제 지원
-- 카드는 단일 카테고리 소속(복사 아님, 이동)
-- 카드 헤더의 이동 드롭다운으로 카테고리 이동
-- 카테고리 삭제 시 소속 카드는 자동으로 `창고` 이동
-- 저장소 추가는 `메인`에서만 가능
+### 3) 상세 모달
+- 탭: `개요 / README / Activity`
+- README는 sanitize된 Markdown 렌더링(heading anchor/table/task-list 스타일)
+- Activity는 저장소 이벤트 기반 타임라인
+- 메모 입력 후 즉시 누적, 영속 저장
 
-### 4) 상세 팝업
-- 탭:
-  - `개요(Overview)`
-  - `README`
-  - `Activity`
-- 개요:
-  - Stars/Forks/Watchers/Open issues 등 메타 정보
-- README:
-  - sanitize된 Markdown 렌더링
-  - heading anchor, table, task list 스타일 반영
-- Activity:
-  - commit / issue / pull request 통합 타임라인
-- 메모:
-  - 최대 500자
-  - 입력 즉시 하단 누적
-  - localStorage 영속화
+### 4) 수동 번역
+- 자동 번역 없음
+- 개요/README/Activity 각각 수동 번역 버튼 제공
+- GLM 우선, OpenAI fallback
 
-### 5) 수동 번역 (자동 번역 없음)
-- 번역 버튼은 상세 탭별 수동 실행
-  - 개요 번역
-  - README 번역
-  - Activity 번역
-- 번역/원문 토글 제공
-
-### 6) 테마
-- 라이트/다크 전환 토글(상단 우측)
-- 다크는 순수 블랙 기반 팔레트
-- 저장값이 없을 때 OS `prefers-color-scheme`를 1회 반영
-- 이후 사용자 선택값 localStorage 우선
-
-### 7) 통합 검색/백업
-- 상단 통합 검색(Provider/Type 필터)
-- PostgreSQL 기반 전역 검색 API 연동
+### 5) 통합검색 + 백업
+- Provider/Type 필터 포함 전역 검색
+- 검색 결과 스코어/매칭 신호(`exact/prefix/fts/trgm`) 지원
 - 백업 내보내기(JSON) / 백업 복원(JSON)
 
-## 기술 스택
+### 6) 테마
+- `light | dark` 토글
+- 저장값 없을 때 OS 다크모드 1회 감지
+- 다크 테마는 순수 블랙 기반 팔레트
 
-- Frontend: React 19 + TypeScript + Vite
-- Backend: Node.js + Express
-- DB: PostgreSQL 15+
-- Markdown: `marked` + `dompurify`
-- 상태 관리: `useReducer` + hooks
-- 저장소: PostgreSQL 단일 소스(권장) + localStorage fallback
-- 테스트: Vitest + Testing Library
+## 아키텍처
+
+### Feature Isolation
+- `src/features/github`
+- `src/features/unified-search`
+- `src/features/youtube`
+- `src/features/bookmark`
+
+각 feature는 독립 엔트리로 동작하고, 공통 계층(`src/core`, `src/shared`)만 참조합니다.
+
+### Shell Composition
+- `AppShell`은 탭 라우팅/테마/초기 마이그레이션만 담당
+- 비즈니스 로직은 각 feature 내부에서 처리
+
+### Data Layer
+- PostgreSQL 단일 스키마(`unified_items`, `unified_notes`, `unified_meta`)
+- 로컬 마이그레이션으로 기존 데이터를 unified 스키마로 이관
+- GitHub 보드는 원격 실패 시 로컬 저장소로 degrade
+
+## 통합검색 방식
+
+서버 `/api/search` 기본 모드는 `mode=relevance`이며, 다음 신호를 결합합니다.
+
+- `exact`: title/native id 정확 일치
+- `prefix`: title 접두사 일치
+- `fts`: `tsvector + websearch_to_tsquery` 기반 의미 검색
+- `trgm`: `pg_trgm similarity + word_similarity` 오탈자 보정
+- `recency`: 최근 업데이트 가점
+
+### 용어를 풀어쓴 동작 설명
+
+1. 검색어 정규화
+- 서버는 검색어를 `lower + unaccent` 처리해 대소문자/악센트 영향을 줄입니다.
+
+2. FTS(Full-Text Search, 전문 검색)
+- `tsvector`는 제목/요약/설명을 검색용 토큰으로 미리 만든 벡터입니다.
+- `websearch_to_tsquery`는 사용자가 입력한 검색어를 질의 객체(`tsquery`)로 변환합니다.
+- 제목(A), 요약(B), 설명(C) 가중치를 다르게 부여해 제목 일치를 더 높게 평가합니다.
+
+3. Prefix(접두사) 매칭
+- `title LIKE '검색어%'` 조건으로 “앞글자부터 맞는” 결과를 가점 처리합니다.
+- 예: `rea` 입력 시 `react` 계열이 빠르게 상단 노출됩니다.
+
+4. Trigram(3글자 조각) 오탈자 보정
+- 문자열을 3글자 단위 조각으로 비교해 유사도를 계산합니다.
+- `similarity + word_similarity`를 함께 사용해 `raect` 같은 철자 오차도 탐지합니다.
+- 현재 구현은 검색어 길이에 따라 임계치를 다르게 적용합니다.
+  - 길이 4자 이상: 0.10 이상
+  - 길이 2~3자: 0.16 이상
+  - 길이 1자: trigram 실질 비활성(노이즈 방지)
+
+5. 최신성 보정(Recency Boost)
+- `updated_at`이 최근일수록 추가 점수를 부여합니다.
+- 같은 관련도라면 최신 데이터가 먼저 나오도록 보정합니다.
+
+랭킹 수식(요약):
+
+```text
+score =
+  exact*5.0 +
+  prefix*2.5 +
+  fts_rank*1.8 +
+  trgm_similarity*1.2 +
+  recency_boost*0.4
+```
+
+정렬은 `score DESC, updated_at DESC`입니다.
+
+### 클라이언트 검색 캐시
+- 메모리 TTL/LRU 결과 캐시:
+  - TTL(Time To Live): 60초
+  - LRU(Least Recently Used): 최대 50개를 넘으면 가장 오래 안 쓴 캐시부터 제거
+- 최근검색(localStorage): `unified_recent_queries_v1`에 최대 20개 저장
+- 캐시 키 구성: `query/provider/type/limit/mode/fuzzy/prefix/minScore` 조합
 
 ## 빠른 시작
 
-### 요구사항
-- Node.js 20+ 권장
-- npm 10+ 권장
-
-### 설치/실행
+### 1) 설치
 
 ```bash
 npm install
-npm run dev
+npm --prefix server install
 ```
 
-브라우저에서 `http://localhost:5173` 접속
-(`5173` 고정, 사용 중이면 `npm run dev`가 실패하도록 설정됨)
-
-### PostgreSQL 서버 실행(옵션)
+### 2) 환경 파일 준비
 
 ```bash
+cp .env.example .env.local
 cp server/.env.example server/.env
-npm --prefix server install
-npm run server:start
 ```
 
-- 기본 API 주소: `http://localhost:4000`
-- 클라이언트에서 PostgreSQL 동기화를 쓰려면 `.env.local`에 `VITE_POSTGRES_SYNC_API_BASE_URL=http://localhost:4000` 추가
-
-PostgreSQL을 로컬 Docker로 띄우려면:
+### 3) PostgreSQL 실행
 
 ```bash
 cd server
 docker-compose up -d
+cd ..
+```
+
+### 4) 스키마 반영 + 서버 실행
+
+```bash
+npm run server:migrate
+npm run server:start
+```
+
+### 5) 프론트 실행
+
+```bash
+npm run dev
 ```
 
 실행 주소:
-- 프론트엔드: `http://localhost:5173`
-- PostgreSQL API: `http://localhost:4000`
-- 헬스체크: `http://localhost:4000/api/health`
-
-### 프로덕션 빌드
-
-```bash
-npm run build
-npm run preview
-```
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:4000`
+- Health: `http://localhost:4000/api/health`
 
 ## 환경 변수
 
-`.env.example`를 복사해 `.env.local`로 사용하면 됩니다.
-
-```bash
-cp .env.example .env.local
-```
+### Client (`.env.local`)
 
 | 변수 | 필수 | 기본값 | 설명 |
 |---|---|---|---|
-| `VITE_GITHUB_TOKEN` | 선택 | - | GitHub API rate limit 완화 |
+| `VITE_GITHUB_TOKEN` | 선택 | - | GitHub API rate-limit 완화 |
 | `VITE_GITHUB_TIMEOUT_SECONDS` | 선택 | `12` | GitHub API 타임아웃(초) |
 | `GLM_API_KEY` | 선택 | - | GLM 번역 API 키 |
 | `GLM_BASE_URL` | 선택 | `https://api.z.ai/api/coding/paas/v4` | GLM API Base URL |
-| `GLM_MODEL` | 선택 | `glm-4.7` | GLM 모델명 |
-| `GLM_TIMEOUT_SECONDS` | 선택 | `30` | GLM 번역 타임아웃(초) |
+| `GLM_MODEL` | 선택 | `glm-4.7` | GLM 모델 |
+| `GLM_TIMEOUT_SECONDS` | 선택 | `30` | GLM 타임아웃(초) |
 | `VITE_OPENAI_API_KEY` | 선택 | - | OpenAI 번역 fallback 키 |
 | `VITE_OPENAI_MODEL` | 선택 | `gpt-4.1-mini` | OpenAI fallback 모델 |
-| `VITE_OPENAI_TIMEOUT_SECONDS` | 선택 | `30` | OpenAI fallback 타임아웃(초) |
-| `VITE_POSTGRES_SYNC_API_BASE_URL` | 선택 | - | PostgreSQL 동기화 API Base URL |
+| `VITE_OPENAI_TIMEOUT_SECONDS` | 선택 | `30` | OpenAI 타임아웃(초) |
+| `VITE_POSTGRES_SYNC_API_BASE_URL` | 선택 | `http://localhost:4000` | 원격 PostgreSQL API |
 
-번역 제공자 우선순위:
-1. `GLM_*`가 있으면 GLM 사용
-2. 없으면 `VITE_OPENAI_*` 사용
-3. 둘 다 없으면 원문 유지
+### Server (`server/.env`)
 
-`vite.config.ts`에서 `envPrefix: ['VITE_', 'GLM_']`를 사용하므로 `GLM_*`도 클라이언트에서 읽습니다.
+| 변수 | 필수 | 기본값 | 설명 |
+|---|---|---|---|
+| `PORT` | 선택 | `4000` | API 포트 |
+| `DATABASE_URL` | 선택 | - | 우선 접속 문자열 |
+| `PGHOST` | 선택 | `localhost` | DB 호스트 |
+| `PGPORT` | 선택 | `55432` | DB 포트 |
+| `PGUSER` | 선택 | `postgres` | DB 유저 |
+| `PGPASSWORD` | 선택 | `postgres` | DB 비밀번호 |
+| `PGDATABASE` | 선택 | `useful_git_info` | DB 이름 |
+| `PGSSL` | 선택 | `false` | SSL 사용 여부 |
+| `CORS_ORIGIN` | 선택 | `http://localhost:5173` | CORS 허용 출처 |
 
-## 동작 규칙
+## 데이터 모델
 
-### 저장소 추가
-- `메인` 카테고리에서만 입력 폼 노출
-- 다른 카테고리는 안내 문구 표시
+핵심 타입은 `src/types.ts`를 기준으로 합니다.
 
-### 카드 이동/삭제
-- 카드 이동 시 대상 카테고리 목록의 맨 위에 배치
-- 카드 삭제 시 연결된 메모 + 상세 캐시 함께 제거
+```ts
+type ProviderType = 'github' | 'youtube' | 'bookmark'
+type UnifiedItemType = 'repository' | 'video' | 'bookmark'
 
-### 카테고리 관리
-- 기본 카테고리(`메인`, `창고`) 삭제 불가
-- 이름변경은 가능
-- 관리 탭에서 검색/정렬/시스템 카테고리 토글 지원
+type UnifiedItem = {
+  id: string // `${provider}:${nativeId}`
+  provider: ProviderType
+  type: UnifiedItemType
+  nativeId: string
+  title: string
+  summary: string
+  description: string
+  url: string
+  tags: string[]
+  author: string | null
+  language: string | null
+  metrics: {
+    stars?: number
+    forks?: number
+    watchers?: number
+    views?: number
+    likes?: number
+  }
+  status: 'active' | 'archived'
+  createdAt: string
+  updatedAt: string
+  savedAt: string
+  raw: Record<string, unknown>
+  score?: number
+  matchedBy?: Array<'exact' | 'prefix' | 'fts' | 'trgm'>
+}
+```
 
-## 테마 시스템
+주요 localStorage 키:
+- `top_section_v1`
+- `github_theme_mode_v1`
+- `unified_recent_queries_v1`
+- `github_cards_v1` (fallback/legacy)
+- `github_notes_v1` (fallback/legacy)
+- `github_repo_detail_cache_v1`
 
-- 모드: `light | dark`
-- localStorage 키: `github_theme_mode_v1`
-- 초기 결정 로직:
-  1. 저장된 테마가 있으면 사용
-  2. 없으면 OS 다크모드 감지(`matchMedia`)
-- DOM 반영:
-  - `document.documentElement.dataset.theme = 'light' | 'dark'`
-- 스타일 전략:
-  - `src/index.css`에서 의미 기반 CSS 변수 정의
-  - `src/App.css`는 토큰 참조 중심으로 구성
-
-## 캐시 전략
-
-상세 팝업(README/Activity)은 캐시 우선 로딩으로 GitHub API 호출을 줄입니다.
-
-- 키: `github_repo_detail_cache_v1`
-- TTL: 24시간 (`DETAIL_CACHE_TTL_HOURS`)
-- 흐름:
-  1. 모달 열기
-  2. 캐시 hit -> 즉시 렌더
-  3. 캐시 miss -> 원격 호출 후 저장
-
-업데이트 확인:
-1. `업데이트 확인` 클릭
-2. 최신 커밋 SHA 비교
-3. 변경 감지 시 `최신 데이터 불러오기` 노출
-
-## 번역 전략
-
-- 자동 번역 없음
-- 탭별 수동 버튼 클릭 시만 호출
-- 실패 시 원문 유지(UX 끊김 방지)
-- Markdown 번역 시 구조(링크/테이블/코드블록) 보존 지시
-
-## 저장소 구조
+## 프로젝트 구조
 
 ```text
 .
@@ -235,141 +262,107 @@ cp .env.example .env.local
 │  ├─ TRD.md
 │  ├─ PLAN.md
 │  └─ PLAN_EXTENTION1.md
-├─ src/
-│  ├─ components/
-│  │  ├─ RepoCard.tsx
-│  │  ├─ RepoDetailModal.tsx
-│  │  ├─ RepoInputForm.tsx
-│  │  ├─ Pagination.tsx
-│  │  └─ CategorySettingsModal.tsx
-│  ├─ services/
-│  │  ├─ github.ts
-│  │  └─ translation.ts
-│  ├─ state/
-│  │  └─ dashboardReducer.ts
-│  ├─ storage/
-│  │  ├─ localStorage.ts
-│  │  └─ detailCache.ts
-│  ├─ utils/
-│  │  ├─ parseGitHubRepoUrl.ts
-│  │  ├─ summary.ts
-│  │  ├─ markdown.ts
-│  │  ├─ paginate.ts
-│  │  └─ theme.ts
-│  ├─ App.tsx
-│  ├─ App.css
-│  ├─ index.css
-│  ├─ constants.ts
-│  └─ types.ts
-└─ README.md
+├─ server/
+│  ├─ db/schema.sql
+│  └─ src/index.js
+├─ scripts/
+│  ├─ run-postgres-e2e.sh
+│  └─ restore-dashboard-from-chrome-localstorage.mjs
+└─ src/
+   ├─ app/
+   │  └─ AppShell.tsx
+   ├─ core/
+   │  ├─ data/
+   │  │  ├─ adapters/
+   │  │  ├─ indexer.ts
+   │  │  ├─ migration.ts
+   │  │  ├─ repository.ts
+   │  │  └─ schema.ts
+   │  └─ navigation/topSection.ts
+   ├─ features/
+   │  ├─ github/
+   │  ├─ unified-search/
+   │  ├─ youtube/
+   │  └─ bookmark/
+   ├─ shared/
+   │  ├─ components/
+   │  ├─ storage/
+   │  └─ types.ts
+   ├─ services/
+   ├─ storage/
+   └─ utils/
 ```
 
-## 데이터 모델
+## API 요약
 
-핵심 타입은 `src/types.ts` 참고.
-
-```ts
-type ThemeMode = 'light' | 'dark'
-
-type Category = {
-  id: 'main' | 'warehouse' | string
-  name: string
-  isSystem: boolean
-  createdAt: string
-}
-
-type GitHubRepoCard = {
-  id: string
-  categoryId: string
-  owner: string
-  repo: string
-  fullName: string
-  description: string
-  summary: string
-  htmlUrl: string
-  homepage: string | null
-  language: string | null
-  stars: number
-  forks: number
-  watchers: number
-  openIssues: number
-  topics: string[]
-  license: string | null
-  defaultBranch: string
-  createdAt: string
-  updatedAt: string
-  addedAt: string
-}
-```
-
-localStorage 키:
-- `github_cards_v1`
-- `github_notes_v1`
-- `github_repo_detail_cache_v1`
-- `github_categories_v1`
-- `github_selected_category_v1`
-- `github_theme_mode_v1`
-- `top_section_v1`
-- `unified_items_v1`
-- `unified_indexes_v1`
-- `unified_meta_v1`
-- `unified_notes_v1`
+주요 엔드포인트:
+- `GET /api/health`
+- `GET /api/health/deep`
+- `GET /api/github/dashboard`
+- `PUT /api/github/dashboard`
+- `PUT /api/providers/:provider/snapshot`
+- `GET /api/providers/:provider/items`
+- `GET /api/items/:id`
+- `GET /api/search`
+- `GET /api/admin/export`
+- `POST /api/admin/import`
 
 ## 스크립트
 
 ```bash
-npm run dev            # 개발 서버
-npm run server:dev     # PostgreSQL API 서버(watch)
-npm run server:start   # PostgreSQL API 서버(start)
-npm run server:migrate # DB 스키마 수동 반영
-npm run build          # 타입체크 + 프로덕션 빌드
-npm run preview        # 빌드 결과 미리보기
-npm run lint           # ESLint
-npm run test           # Vitest 일회 실행
-npm run test:e2e:postgres # PostgreSQL E2E(스냅샷/라운드트립)
-npm run test:watch     # Vitest watch
-npm run test:coverage  # 커버리지 포함 테스트
+npm run dev                  # frontend dev (5173)
+npm run server:dev           # backend watch
+npm run server:start         # backend start
+npm run server:migrate       # schema apply
+npm run build                # typecheck + build
+npm run preview              # preview build
+npm run lint                 # lint
+npm run test                 # unit/integration
+npm run test:e2e:postgres    # postgres e2e
+npm run test:watch           # watch mode
+npm run test:coverage        # coverage
+npm run restore:dashboard:chrome
 ```
-
-`test:e2e:postgres`는 전용 API 서버를 `http://localhost:4100`(기본)으로 자동 기동해 실행합니다.
 
 ## 테스트
 
-현재 주요 테스트 범위:
-- URL 파서
-- 페이지네이션
-- 리듀서(카테고리/이동/삭제)
-- Markdown 렌더 sanitize
-- 번역 서비스 fallback
-- 테마 유틸/스토리지
-- App 통합 시나리오(등록/중복/이동/상세/메모/테마)
-- PostgreSQL E2E(저장/재로딩 라운드트립)
+기본 실행:
 
 ```bash
 npm run test
 ```
 
+PostgreSQL E2E:
+
+```bash
+npm run test:e2e:postgres
+```
+
+`test:e2e:postgres`는 전용 DB/포트(`4100` 기본)를 사용해 메인 데이터 오염을 방지합니다.
+
 ## 트러블슈팅
 
-### 1) GitHub API 요청 제한(403)
+### 1) `대시보드 저장에 실패했습니다`
+- `VITE_POSTGRES_SYNC_API_BASE_URL` 확인
+- `server` 실행 및 `/api/health` 정상 응답 확인
+- 실패 시 GitHub feature는 로컬 저장으로 degrade됩니다.
+
+### 2) 통합검색 결과가 없거나 느림
+- 서버 `/api/search` 응답 확인
+- DB 확장(`pg_trgm`, `unaccent`) 및 인덱스 적용 확인
+- 동일 검색 반복 시 60초 캐시 동작 여부 확인
+
+### 3) GitHub API 제한(403)
 - `VITE_GITHUB_TOKEN` 설정
-- 필요 시 상세 캐시를 활용해 동일 리포 재조회 최소화
+- 상세 캐시 사용/업데이트 빈도 점검
 
-### 2) README/Activity가 비어 보일 때
-- 저장소가 비어 있거나 API 응답이 제한될 수 있음
-- 상세 팝업에서 `업데이트 확인` → 필요 시 `최신 데이터 불러오기`
-
-### 3) 번역이 동작하지 않을 때
+### 4) 번역 미동작
 - `GLM_API_KEY` 또는 `VITE_OPENAI_API_KEY` 설정 확인
-- 모델/타임아웃 변수 값 확인
-
-### 4) 캐시 초기화
-- 브라우저 localStorage에서 아래 키 삭제:
-  - `github_repo_detail_cache_v1`
-  - 필요 시 `github_cards_v1`, `github_notes_v1`
+- 타임아웃/모델 변수 확인
 
 ## 문서
 
 - 제품 요구사항: `docs/PRD.md`
 - 기술 설계: `docs/TRD.md`
-- 구현/확장 계획: `docs/PLAN.md`, `docs/PLAN_EXTENTION1.md`
+- 구현 계획: `docs/PLAN.md`
+- 확장 계획: `docs/PLAN_EXTENTION1.md`

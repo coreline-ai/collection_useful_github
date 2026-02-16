@@ -1,10 +1,10 @@
 import type { TopSection } from '@shared/types'
 
 type SectionPlaceholderProps = {
-  section: Exclude<TopSection, 'github'>
+  section: Exclude<TopSection, 'github' | 'search'>
 }
 
-const contentBySection: Record<Exclude<TopSection, 'github'>, { title: string; description: string }> = {
+const contentBySection: Record<Exclude<TopSection, 'github' | 'search'>, { title: string; description: string }> = {
   youtube: {
     title: '유튜브',
     description: '유튜브 기능은 준비중입니다.',
