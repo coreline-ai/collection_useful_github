@@ -4,7 +4,6 @@ import type {
   BookmarkDashboardSnapshot,
   Category,
   CategoryId,
-  GitHubRepoCard,
   GitHubDashboardSnapshot,
   ProviderType,
   UnifiedItem,
@@ -16,8 +15,6 @@ import { DEFAULT_MAIN_CATEGORY_ID, DEFAULT_WAREHOUSE_CATEGORY_ID } from '@consta
 import {
   loadBookmarkCategories,
   loadBookmarkSelectedCategoryId,
-  loadCategories,
-  loadSelectedCategoryId,
   loadYoutubeCategories,
   loadYoutubeSelectedCategoryId,
 } from '@shared/storage/localStorage'
@@ -60,10 +57,6 @@ type ApiResponse<T> = {
   ok: boolean
   message?: string
 } & T
-
-type ProviderNotesPayload = ApiResponse<{
-  notes: Array<{ id: string; itemId: string; content: string; createdAt: string }>
-}>
 
 type SaveDashboardResponse = {
   revision: number
@@ -219,20 +212,6 @@ const ensureSystemCategories = (rawCategories: Category[]): Category[] => {
   return [map.get(DEFAULT_MAIN_CATEGORY_ID)!, map.get(DEFAULT_WAREHOUSE_CATEGORY_ID)!, ...custom]
 }
 
-const resolveFallbackCategories = (): { categories: Category[]; selectedCategoryId: CategoryId } => {
-  const categories = ensureSystemCategories(loadCategories())
-  const selectedCategoryId = loadSelectedCategoryId()
-  const resolvedSelectedCategoryId =
-    selectedCategoryId && categories.some((category) => category.id === selectedCategoryId)
-      ? selectedCategoryId
-      : DEFAULT_MAIN_CATEGORY_ID
-
-  return {
-    categories,
-    selectedCategoryId: resolvedSelectedCategoryId,
-  }
-}
-
 const resolveFallbackYoutubeCategories = (): { categories: Category[]; selectedCategoryId: CategoryId } => {
   const categories = ensureSystemCategories(loadYoutubeCategories())
   const selectedCategoryId = loadYoutubeSelectedCategoryId()
@@ -258,99 +237,6 @@ const resolveFallbackBookmarkCategories = (): { categories: Category[]; selected
   return {
     categories,
     selectedCategoryId: resolvedSelectedCategoryId,
-  }
-}
-
-const mapUnifiedItemToGithubCard = (item: UnifiedItem): GitHubRepoCard => {
-  const rawCard = (item.raw?.card ?? null) as Partial<GitHubRepoCard> | null
-
-  if (rawCard && typeof rawCard === 'object' && rawCard.id) {
-    const rawId = String(rawCard.id).toLowerCase()
-    const [rawOwner = '', rawRepo = ''] = rawId.split('/')
-
-    return {
-      id: rawId,
-      categoryId: rawCard.categoryId || DEFAULT_MAIN_CATEGORY_ID,
-      owner: rawCard.owner || rawOwner,
-      repo: rawCard.repo || rawRepo,
-      fullName: rawCard.fullName || rawId,
-      description: rawCard.description || item.description || '',
-      summary: rawCard.summary || item.summary || '',
-      htmlUrl: rawCard.htmlUrl || item.url || `https://github.com/${rawId}`,
-      homepage: rawCard.homepage ?? null,
-      language: rawCard.language || item.language || null,
-      stars: Number(rawCard.stars ?? item.metrics?.stars ?? 0),
-      forks: Number(rawCard.forks ?? item.metrics?.forks ?? 0),
-      watchers: Number(rawCard.watchers ?? item.metrics?.watchers ?? 0),
-      openIssues: Number(rawCard.openIssues ?? 0),
-      topics: Array.isArray(rawCard.topics) ? rawCard.topics : item.tags || [],
-      license: rawCard.license ?? null,
-      defaultBranch: rawCard.defaultBranch || 'main',
-      createdAt: toIso(rawCard.createdAt || item.createdAt),
-      updatedAt: toIso(rawCard.updatedAt || item.updatedAt),
-      addedAt: toIso(rawCard.addedAt || item.savedAt),
-    }
-  }
-
-  const nativeId = String(item.nativeId || '').toLowerCase()
-  const [owner = '', repo = ''] = nativeId.split('/')
-
-  return {
-    id: nativeId,
-    categoryId: (item.raw?.categoryId as CategoryId | undefined) || DEFAULT_MAIN_CATEGORY_ID,
-    owner,
-    repo,
-    fullName: item.title || nativeId,
-    description: item.description || '',
-    summary: item.summary || '',
-    htmlUrl: item.url || `https://github.com/${nativeId}`,
-    homepage: null,
-    language: item.language || null,
-    stars: Number(item.metrics?.stars ?? 0),
-    forks: Number(item.metrics?.forks ?? 0),
-    watchers: Number(item.metrics?.watchers ?? 0),
-    openIssues: 0,
-    topics: Array.isArray(item.tags) ? item.tags : [],
-    license: null,
-    defaultBranch: 'main',
-    createdAt: toIso(item.createdAt),
-    updatedAt: toIso(item.updatedAt),
-    addedAt: toIso(item.savedAt),
-  }
-}
-
-const toUnifiedGithubItem = (card: GitHubRepoCard, sortIndex: number): UnifiedItem => {
-  const normalizedId = card.id.toLowerCase()
-
-  return {
-    id: `github:${normalizedId}`,
-    provider: 'github',
-    type: 'repository',
-    nativeId: normalizedId,
-    title: card.fullName || normalizedId,
-    summary: card.summary || '',
-    description: card.description || '',
-    url: card.htmlUrl || `https://github.com/${normalizedId}`,
-    tags: Array.isArray(card.topics) ? card.topics : [],
-    author: card.owner || null,
-    language: card.language || null,
-    metrics: {
-      stars: Number(card.stars || 0),
-      forks: Number(card.forks || 0),
-      watchers: Number(card.watchers || 0),
-    },
-    status: 'active',
-    createdAt: toIso(card.createdAt),
-    updatedAt: toIso(card.updatedAt),
-    savedAt: toIso(card.addedAt),
-    raw: {
-      categoryId: card.categoryId,
-      sortIndex,
-      card: {
-        ...card,
-        id: normalizedId,
-      },
-    },
   }
 }
 
@@ -549,79 +435,6 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
   }
 }
 
-const loadGithubDashboardFromLegacyApi = async (): Promise<GitHubDashboardSnapshot> => {
-  const itemsResponse = await requestWithRetry('/api/providers/github/items?limit=1000')
-
-  if (!itemsResponse.ok) {
-    throw new Error(await parseErrorMessage(itemsResponse, '대시보드 데이터를 불러오지 못했습니다.'))
-  }
-
-  const itemsPayload = (await itemsResponse.json()) as ApiResponse<{ items: UnifiedItem[] }>
-  const cards = Array.isArray(itemsPayload.items)
-    ? itemsPayload.items.filter((item) => item.provider === 'github').map(mapUnifiedItemToGithubCard)
-    : []
-
-  const notesByRepo: GitHubDashboardSnapshot['notesByRepo'] = {}
-  const notesResponse = await requestWithRetry('/api/providers/github/notes?limit=3000')
-
-  if (notesResponse.ok) {
-    const notesPayload = (await notesResponse.json()) as ProviderNotesPayload
-
-    for (const note of notesPayload.notes || []) {
-      const repoId = String(note.itemId || '').replace(/^github:/, '')
-      const content = typeof note.content === 'string' ? note.content.trim() : ''
-
-      if (!repoId || !content) {
-        continue
-      }
-
-      const current = notesByRepo[repoId] || []
-      current.push({
-        id: String(note.id || `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`),
-        repoId,
-        content,
-        createdAt: toIso(note.createdAt),
-      })
-      notesByRepo[repoId] = current
-    }
-  }
-
-  const { categories, selectedCategoryId } = resolveFallbackCategories()
-
-  return {
-    cards,
-    notesByRepo,
-    categories,
-    selectedCategoryId,
-  }
-}
-
-const saveGithubDashboardToLegacyApi = async (dashboard: GitHubDashboardSnapshot): Promise<void> => {
-  const items = dashboard.cards.map((card, index) => toUnifiedGithubItem(card, index))
-  const notesByItem = Object.fromEntries(
-    Object.entries(dashboard.notesByRepo).map(([repoId, notes]) => [
-      `github:${repoId}`,
-      (notes || []).map((note) => ({
-        id: note.id,
-        content: note.content,
-        createdAt: toIso(note.createdAt),
-      })),
-    ]),
-  )
-
-  const response = await requestWithRetry('/api/providers/github/snapshot', {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ items, notesByItem }),
-  })
-
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, '대시보드 저장에 실패했습니다.'))
-  }
-}
-
 const loadYoutubeDashboardFromLegacyApi = async (): Promise<YouTubeDashboardSnapshot> => {
   const itemsResponse = await requestWithRetry('/api/providers/youtube/items?limit=1000')
 
@@ -704,7 +517,7 @@ export const loadGithubDashboardFromRemote = async (): Promise<GitHubDashboardSn
   const response = await requestWithRetry('/api/github/dashboard')
 
   if (response.status === 404) {
-    return loadGithubDashboardFromLegacyApi()
+    throw new Error('GitHub 대시보드 API(/api/github/dashboard)를 찾을 수 없습니다. 서버를 최신 버전으로 업데이트해 주세요.')
   }
 
   if (!response.ok) {
@@ -737,8 +550,7 @@ export const saveGithubDashboardToRemote = async (
   })
 
   if (response.status === 404) {
-    await saveGithubDashboardToLegacyApi(dashboard)
-    return null
+    throw new Error('GitHub 대시보드 API(/api/github/dashboard)를 찾을 수 없습니다. 서버를 최신 버전으로 업데이트해 주세요.')
   }
 
   if (!response.ok) {

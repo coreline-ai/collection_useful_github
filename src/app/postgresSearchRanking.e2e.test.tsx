@@ -8,6 +8,34 @@ const shouldRunPostgresE2E =
   'true'
 const describeIfPostgresE2E = shouldRunPostgresE2E ? describe : describe.skip
 
+const upsertGithubDashboard = async (cards: Array<Record<string, unknown>>) => {
+  const currentResponse = await fetch(`${API_BASE}/api/github/dashboard`)
+  const currentPayload = (await currentResponse.json()) as { dashboard?: { revision?: number } }
+  const expectedRevision =
+    typeof currentPayload.dashboard?.revision === 'number' ? currentPayload.dashboard.revision : null
+
+  return fetch(`${API_BASE}/api/github/dashboard`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      dashboard: {
+        cards,
+        notesByRepo: {},
+        categories: [
+          { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        selectedCategoryId: 'main',
+      },
+      expectedRevision,
+      allowDestructiveSync: true,
+      eventType: 'restore',
+    }),
+  })
+}
+
 describeIfPostgresE2E('PostgreSQL search ranking E2E', () => {
   beforeAll(async () => {
     vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', API_BASE)
@@ -23,75 +51,77 @@ describeIfPostgresE2E('PostgreSQL search ranking E2E', () => {
   })
 
   beforeEach(async () => {
+    const githubCards = [
+      {
+        id: 'facebook/react',
+        categoryId: 'main',
+        owner: 'facebook',
+        repo: 'react',
+        fullName: 'facebook/react',
+        description: 'A JavaScript library for building user interfaces',
+        summary: 'React library for building user interfaces',
+        htmlUrl: 'https://github.com/facebook/react',
+        homepage: null,
+        language: 'TypeScript',
+        stars: 1,
+        forks: 1,
+        watchers: 1,
+        openIssues: 1,
+        topics: ['react', 'ui'],
+        license: 'MIT',
+        defaultBranch: 'main',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-02-16T00:00:00.000Z',
+        addedAt: '2026-02-16T00:00:00.000Z',
+      },
+      {
+        id: 'acme/rea-starter',
+        categoryId: 'main',
+        owner: 'acme',
+        repo: 'rea-starter',
+        fullName: 'acme/rea-starter',
+        description: 'Template project',
+        summary: 'Starter template with rea prefix',
+        htmlUrl: 'https://github.com/acme/rea-starter',
+        homepage: null,
+        language: 'TypeScript',
+        stars: 1,
+        forks: 1,
+        watchers: 1,
+        openIssues: 1,
+        topics: ['starter'],
+        license: 'MIT',
+        defaultBranch: 'main',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-02-16T00:00:00.000Z',
+        addedAt: '2026-02-16T00:00:00.000Z',
+      },
+      {
+        id: 'acme/legacy-tool',
+        categoryId: 'main',
+        owner: 'acme',
+        repo: 'legacy-tool',
+        fullName: 'acme/legacy-tool',
+        description: 'No related keywords',
+        summary: 'Legacy helper utilities',
+        htmlUrl: 'https://github.com/acme/legacy-tool',
+        homepage: null,
+        language: 'TypeScript',
+        stars: 1,
+        forks: 1,
+        watchers: 1,
+        openIssues: 1,
+        topics: ['legacy'],
+        license: 'MIT',
+        defaultBranch: 'main',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-02-16T00:00:00.000Z',
+        addedAt: '2026-02-16T00:00:00.000Z',
+      },
+    ]
+
     const [resetGithubResponse, resetYoutubeResponse] = await Promise.all([
-      fetch(`${API_BASE}/api/providers/github/snapshot`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          items: [
-            {
-              id: 'github:facebook/react',
-              provider: 'github',
-              type: 'repository',
-              nativeId: 'facebook/react',
-              title: 'facebook/react',
-              summary: 'React library for building user interfaces',
-              description: 'A JavaScript library for building user interfaces',
-              url: 'https://github.com/facebook/react',
-              tags: ['react', 'ui'],
-              author: 'facebook',
-              language: 'TypeScript',
-              metrics: { stars: 1, forks: 1, watchers: 1 },
-              status: 'active',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-02-16T00:00:00.000Z',
-              savedAt: '2026-02-16T00:00:00.000Z',
-              raw: {},
-            },
-            {
-              id: 'github:acme/rea-starter',
-              provider: 'github',
-              type: 'repository',
-              nativeId: 'acme/rea-starter',
-              title: 'acme/rea-starter',
-              summary: 'Starter template with rea prefix',
-              description: 'Template project',
-              url: 'https://github.com/acme/rea-starter',
-              tags: ['starter'],
-              author: 'acme',
-              language: 'TypeScript',
-              metrics: { stars: 1, forks: 1, watchers: 1 },
-              status: 'active',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-02-16T00:00:00.000Z',
-              savedAt: '2026-02-16T00:00:00.000Z',
-              raw: {},
-            },
-            {
-              id: 'github:acme/legacy-tool',
-              provider: 'github',
-              type: 'repository',
-              nativeId: 'acme/legacy-tool',
-              title: 'acme/legacy-tool',
-              summary: 'Legacy helper utilities',
-              description: 'No related keywords',
-              url: 'https://github.com/acme/legacy-tool',
-              tags: ['legacy'],
-              author: 'acme',
-              language: 'TypeScript',
-              metrics: { stars: 1, forks: 1, watchers: 1 },
-              status: 'active',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-02-16T00:00:00.000Z',
-              savedAt: '2026-02-16T00:00:00.000Z',
-              raw: {},
-            },
-          ],
-          notesByItem: {},
-        }),
-      }),
+      upsertGithubDashboard(githubCards),
       fetch(`${API_BASE}/api/providers/youtube/snapshot`, {
         method: 'PUT',
         headers: {

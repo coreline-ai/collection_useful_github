@@ -58,6 +58,32 @@ const mockMatchMedia = (matches: boolean) => {
   })
 }
 
+const resetGithubDashboard = async () => {
+  const currentResponse = await fetch(`${API_BASE}/api/github/dashboard`)
+  const currentPayload = (await currentResponse.json()) as { dashboard?: { revision?: number } }
+  const expectedRevision =
+    typeof currentPayload.dashboard?.revision === 'number' ? currentPayload.dashboard.revision : null
+
+  return fetch(`${API_BASE}/api/github/dashboard`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      dashboard: {
+        cards: [],
+        notesByRepo: {},
+        categories: [
+          { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        selectedCategoryId: 'main',
+      },
+      expectedRevision,
+      allowDestructiveSync: true,
+      eventType: 'restore',
+    }),
+  })
+}
+
 describeIfPostgresE2E('PostgreSQL dashboard roundtrip E2E', () => {
   beforeAll(async () => {
     vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', API_BASE)
@@ -80,35 +106,10 @@ describeIfPostgresE2E('PostgreSQL dashboard roundtrip E2E', () => {
     vi.mocked(fetchRepoDetail).mockResolvedValue({ readmePreview: null, recentActivity: [] })
     vi.mocked(fetchLatestCommitSha).mockResolvedValue(null)
 
-    const resetDashboard = await fetch(`${API_BASE}/api/github/dashboard`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dashboard: {
-          cards: [],
-          notesByRepo: {},
-          categories: [
-            { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
-            { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
-          ],
-          selectedCategoryId: 'main',
-        },
-      }),
-    })
+    const resetDashboard = await resetGithubDashboard()
 
     if (!resetDashboard.ok) {
-      const fallback = await fetch(`${API_BASE}/api/providers/github/snapshot`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: [],
-          notesByItem: {},
-        }),
-      })
-
-      if (!fallback.ok) {
-        throw new Error('Failed to reset dashboard')
-      }
+      throw new Error('Failed to reset dashboard')
     }
   })
 

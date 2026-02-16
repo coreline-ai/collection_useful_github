@@ -244,112 +244,57 @@ describe('remoteDb adapter', () => {
     expect(requestedUrl).toContain('min_score=0.5')
   })
 
-  it('falls back to legacy dashboard load when new endpoint is missing', async () => {
+  it('throws when github dashboard endpoint is missing', async () => {
     vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
 
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(asResponse(404, { ok: false }))
-      .mockResolvedValueOnce(
-        asResponse(200, {
-          ok: true,
-          items: [
-            {
-              id: 'github:facebook/react',
-              provider: 'github',
-              type: 'repository',
-              nativeId: 'facebook/react',
-              title: 'facebook/react',
-              summary: 'React summary',
-              description: 'React desc',
-              url: 'https://github.com/facebook/react',
-              tags: ['react'],
-              author: 'facebook',
-              language: 'TypeScript',
-              metrics: { stars: 1, forks: 1, watchers: 1 },
-              status: 'active',
-              createdAt: '2026-01-01T00:00:00.000Z',
-              updatedAt: '2026-01-01T00:00:00.000Z',
-              savedAt: '2026-01-01T00:00:00.000Z',
-              raw: {
-                card: {
-                  id: 'facebook/react',
-                  owner: 'facebook',
-                  repo: 'react',
-                  fullName: 'facebook/react',
-                  description: 'React desc',
-                  summary: 'React summary',
-                  htmlUrl: 'https://github.com/facebook/react',
-                  homepage: null,
-                  language: 'TypeScript',
-                  stars: 1,
-                  forks: 1,
-                  watchers: 1,
-                  openIssues: 1,
-                  topics: ['react'],
-                  license: 'MIT',
-                  defaultBranch: 'main',
-                  createdAt: '2026-01-01T00:00:00.000Z',
-                  updatedAt: '2026-01-01T00:00:00.000Z',
-                  addedAt: '2026-01-01T00:00:00.000Z',
-                  categoryId: 'main',
-                },
-              },
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(asResponse(404, { ok: false }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(asResponse(404, { ok: false }))
 
-    const dashboard = await loadGithubDashboardFromRemote()
-
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(dashboard?.cards).toHaveLength(1)
-    expect(dashboard?.cards[0].id).toBe('facebook/react')
+    await expect(loadGithubDashboardFromRemote()).rejects.toThrow(
+      'GitHub 대시보드 API(/api/github/dashboard)를 찾을 수 없습니다.',
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to legacy snapshot save when new endpoint is missing', async () => {
+  it('throws when github dashboard save endpoint is missing', async () => {
     vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
 
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(asResponse(404, { ok: false }))
-      .mockResolvedValueOnce(asResponse(200, { ok: true }))
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(asResponse(404, { ok: false }))
 
-    await saveGithubDashboardToRemote({
-      cards: [
-        {
-          id: 'facebook/react',
-          categoryId: 'main',
-          owner: 'facebook',
-          repo: 'react',
-          fullName: 'facebook/react',
-          description: 'React desc',
-          summary: 'React summary',
-          htmlUrl: 'https://github.com/facebook/react',
-          homepage: null,
-          language: 'TypeScript',
-          stars: 1,
-          forks: 1,
-          watchers: 1,
-          openIssues: 1,
-          topics: ['react'],
-          license: 'MIT',
-          defaultBranch: 'main',
-          createdAt: '2026-01-01T00:00:00.000Z',
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          addedAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      notesByRepo: {},
-      categories: [
-        { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
-        { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
-      ],
-      selectedCategoryId: 'main',
-    })
+    await expect(
+      saveGithubDashboardToRemote({
+        cards: [
+          {
+            id: 'facebook/react',
+            categoryId: 'main',
+            owner: 'facebook',
+            repo: 'react',
+            fullName: 'facebook/react',
+            description: 'React desc',
+            summary: 'React summary',
+            htmlUrl: 'https://github.com/facebook/react',
+            homepage: null,
+            language: 'TypeScript',
+            stars: 1,
+            forks: 1,
+            watchers: 1,
+            openIssues: 1,
+            topics: ['react'],
+            license: 'MIT',
+            defaultBranch: 'main',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+            addedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        notesByRepo: {},
+        categories: [
+          { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        selectedCategoryId: 'main',
+      }),
+    ).rejects.toThrow('GitHub 대시보드 API(/api/github/dashboard)를 찾을 수 없습니다.')
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/api/providers/github/snapshot')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

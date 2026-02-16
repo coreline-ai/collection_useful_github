@@ -209,4 +209,65 @@ describeIfPostgresE2E('PostgreSQL GitHub dashboard history/rollback E2E', () => 
     const forced = await putDashboardRaw(accidentalShrink, { allowDestructiveSync: true, eventType: 'restore' })
     expect(forced.ok).toBe(true)
   })
+
+  it('blocks low-overlap replacement save without explicit destructive override', async () => {
+    const sourceDashboard: DashboardPayload = {
+      cards: [
+        makeCard('overlap/a1'),
+        makeCard('overlap/a2'),
+        makeCard('overlap/a3'),
+        makeCard('overlap/a4'),
+        makeCard('overlap/a5'),
+        makeCard('overlap/a6'),
+      ],
+      notesByRepo: {},
+      categories: SYSTEM_CATEGORIES,
+      selectedCategoryId: 'main',
+    }
+
+    const seed = await putDashboardRaw(sourceDashboard, { allowDestructiveSync: true, eventType: 'restore' })
+    expect(seed.ok).toBe(true)
+
+    const lowOverlapDashboard: DashboardPayload = {
+      cards: [
+        makeCard('overlap/b1'),
+        makeCard('overlap/b2'),
+        makeCard('overlap/b3'),
+        makeCard('overlap/b4'),
+        makeCard('overlap/b5'),
+        makeCard('overlap/b6'),
+      ],
+      notesByRepo: {},
+      categories: SYSTEM_CATEGORIES,
+      selectedCategoryId: 'main',
+    }
+
+    const blocked = await putDashboardRaw(lowOverlapDashboard)
+    expect(blocked.status).toBe(409)
+    const blockedPayload = (await blocked.json()) as { ok: boolean; message?: string }
+    expect(blockedPayload.ok).toBe(false)
+    expect(blockedPayload.message || '').toContain('겹침률')
+
+    const forced = await putDashboardRaw(lowOverlapDashboard, {
+      allowDestructiveSync: true,
+      eventType: 'restore',
+    })
+    expect(forced.ok).toBe(true)
+  })
+
+  it('blocks legacy github provider snapshot writes', async () => {
+    const response = await fetch(`${API_BASE}/api/providers/github/snapshot`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: [],
+        notesByItem: {},
+      }),
+    })
+
+    expect(response.status).toBe(409)
+    const payload = (await response.json()) as { ok: boolean; message?: string }
+    expect(payload.ok).toBe(false)
+    expect(payload.message || '').toContain('레거시 snapshot 저장은 차단')
+  })
 })

@@ -930,6 +930,7 @@ const rollbackGithubDashboard = async (revision) => {
 }
 
 const GITHUB_HISTORY_EVENT_TYPES = new Set(['save', 'rollback', 'import', 'restore'])
+const GITHUB_DESTRUCTIVE_EVENT_TYPES = new Set(['rollback', 'import', 'restore'])
 
 const parseGithubHistoryEventType = (value, fallback = 'save') => {
   if (typeof value !== 'string' || !value.trim()) {
@@ -944,6 +945,19 @@ const parseGithubHistoryEventType = (value, fallback = 'save') => {
   return normalized
 }
 
+const ensureGithubDestructivePolicy = (allowDestructiveSync, eventType) => {
+  if (!allowDestructiveSync) {
+    return
+  }
+
+  if (!GITHUB_DESTRUCTIVE_EVENT_TYPES.has(eventType)) {
+    throw createHttpError(
+      400,
+      'allowDestructiveSync=true 는 eventType이 rollback/import/restore 인 경우에만 허용됩니다.',
+    )
+  }
+}
+
 const persistGithubDashboard = async (
   dashboard,
   expectedRevision = null,
@@ -956,6 +970,7 @@ const persistGithubDashboard = async (
   const notes = buildNoteRecordsFromNotesByRepo(normalized.notesByRepo).filter((note) => itemIds.has(note.itemId))
 
   const normalizedEventType = parseGithubHistoryEventType(eventType, 'save')
+  ensureGithubDestructivePolicy(allowDestructiveSync, normalizedEventType)
 
   const client = await getClient()
 
@@ -988,19 +1003,50 @@ const persistGithubDashboard = async (
         WHERE provider = 'github'
       `,
     )
+    const currentIdsResult = await client.query(
+      `
+        SELECT LOWER(native_id) AS native_id
+        FROM unified_items
+        WHERE provider = 'github'
+      `,
+    )
     const currentCount = Number(currentCountResult.rows[0]?.count || 0)
     const nextCount = items.length
+    const currentNativeIds = new Set(currentIdsResult.rows.map((row) => String(row.native_id || '').trim()).filter(Boolean))
+    const nextNativeIds = new Set(items.map((item) => String(item.nativeId || '').toLowerCase().trim()).filter(Boolean))
+    let overlapCount = 0
+    for (const nativeId of nextNativeIds) {
+      if (currentNativeIds.has(nativeId)) {
+        overlapCount += 1
+      }
+    }
+    const overlapBase = Math.min(currentNativeIds.size, nextNativeIds.size)
+    const overlapRatio = overlapBase > 0 ? overlapCount / overlapBase : 1
     const dropCount = Math.max(currentCount - nextCount, 0)
     const dropRatio = currentCount > 0 ? dropCount / currentCount : 0
     const hasSignificantDrop =
       currentCount >= 6 &&
       nextCount < currentCount &&
       (dropRatio >= githubSaveMaxDropRatio || nextCount === 0)
+    const hasSuspiciousReplacement =
+      normalizedEventType === 'save' &&
+      currentCount >= 6 &&
+      nextCount >= 6 &&
+      overlapRatio < 0.5
 
     if (!allowDestructiveSync && hasSignificantDrop) {
       throw createHttpError(
         409,
         `GitHub 대시보드 보호 정책으로 저장이 차단되었습니다. 현재 ${currentCount}개에서 ${nextCount}개로 급감합니다.`,
+      )
+    }
+
+    if (!allowDestructiveSync && hasSuspiciousReplacement) {
+      throw createHttpError(
+        409,
+        `GitHub 대시보드 보호 정책으로 저장이 차단되었습니다. 기존 데이터와 겹침률이 낮습니다(${Math.round(
+          overlapRatio * 100,
+        )}%).`,
       )
     }
 
@@ -2211,6 +2257,7 @@ app.put('/api/github/dashboard', requireAdminAuth, async (req, res, next) => {
     const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
     const eventType = parseGithubHistoryEventType(req.body?.eventType, 'save')
     const allowDestructiveSync = parseBoolean(req.body?.allowDestructiveSync, false)
+    ensureGithubDestructivePolicy(allowDestructiveSync, eventType)
     const result = await persistGithubDashboard(dashboard, expectedRevision, eventType, {
       allowDestructiveSync,
     })
@@ -2290,12 +2337,20 @@ app.put('/api/providers/:provider/snapshot', requireAdminAuth, async (req, res, 
       const dashboard = normalizeDashboardPayload(req.body.dashboard)
       const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
       const eventType = parseGithubHistoryEventType(req.body?.eventType, 'import')
-      const allowDestructiveSync = parseBoolean(req.body?.allowDestructiveSync, true)
+      const allowDestructiveSync = parseBoolean(req.body?.allowDestructiveSync, false)
+      ensureGithubDestructivePolicy(allowDestructiveSync, eventType)
       const result = await persistGithubDashboard(dashboard, expectedRevision, eventType, {
         allowDestructiveSync,
       })
       res.json({ ok: true, provider, ...result })
       return
+    }
+
+    if (provider === 'github') {
+      throw createHttpError(
+        409,
+        'GitHub 레거시 snapshot 저장은 차단되었습니다. /api/github/dashboard 경로를 사용해 주세요.',
+      )
     }
 
     const rawItems = Array.isArray(req.body?.items) ? req.body.items : []
