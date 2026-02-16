@@ -4,6 +4,11 @@ export const DETAIL_CACHE_STORAGE_KEY = 'github_repo_detail_cache_v1'
 export const CATEGORIES_STORAGE_KEY = 'github_categories_v1'
 export const SELECTED_CATEGORY_STORAGE_KEY = 'github_selected_category_v1'
 export const THEME_STORAGE_KEY = 'github_theme_mode_v1'
+export const TOP_SECTION_STORAGE_KEY = 'top_section_v1'
+export const UNIFIED_ITEMS_STORAGE_KEY = 'unified_items_v1'
+export const UNIFIED_INDEXES_STORAGE_KEY = 'unified_indexes_v1'
+export const UNIFIED_META_STORAGE_KEY = 'unified_meta_v1'
+export const UNIFIED_NOTES_STORAGE_KEY = 'unified_notes_v1'
 
 export const CARDS_PER_PAGE = 12
 export const GRID_COLUMNS_DESKTOP = 4

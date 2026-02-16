@@ -1,16 +1,29 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { THEME_STORAGE_KEY } from './constants'
+import { THEME_STORAGE_KEY, TOP_SECTION_STORAGE_KEY } from './constants'
 import type { GitHubRepoCard, RepoDetailData } from './types'
 
-vi.mock('./services/github', () => ({
+vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
 }))
 
-const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('./services/github')
+vi.mock('@core/data/adapters/remoteDb', () => ({
+  isRemoteSnapshotEnabled: vi.fn(() => false),
+  loadGithubDashboardFromRemote: vi.fn().mockResolvedValue(null),
+  saveGithubDashboardToRemote: vi.fn().mockResolvedValue(undefined),
+  searchUnifiedItems: vi.fn().mockResolvedValue([]),
+  exportUnifiedBackup: vi.fn().mockResolvedValue({
+    version: 1,
+    exportedAt: new Date(0).toISOString(),
+    data: { items: [], notes: [], meta: {} },
+  }),
+  importUnifiedBackup: vi.fn().mockResolvedValue(undefined),
+}))
+
+const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
 
 const mockCard: GitHubRepoCard = {
   id: 'facebook/react',
@@ -93,6 +106,32 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '다크 테마 켜기' }))
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
+  })
+
+  it('shows github section by default', () => {
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: '깃허브' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
+  })
+
+  it('switches to youtube placeholder and hides github board', () => {
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
+
+    expect(screen.getByText('유튜브 기능은 준비중입니다.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
+    expect(window.localStorage.getItem(TOP_SECTION_STORAGE_KEY)).toBe('youtube')
+  })
+
+  it('restores selected top section from storage', () => {
+    window.localStorage.setItem(TOP_SECTION_STORAGE_KEY, 'bookmark')
+
+    render(<App />)
+
+    expect(screen.getByRole('tab', { name: '북마크' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('북마크 기능은 준비중입니다.')).toBeInTheDocument()
   })
 
   it('adds repo card and blocks duplicate', async () => {
