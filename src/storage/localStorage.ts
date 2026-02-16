@@ -4,8 +4,9 @@ import {
   DEFAULT_MAIN_CATEGORY_ID,
   NOTES_STORAGE_KEY,
   SELECTED_CATEGORY_STORAGE_KEY,
+  THEME_STORAGE_KEY,
 } from '../constants'
-import type { Category, CategoryId, GitHubRepoCard, NotesByRepo } from '../types'
+import type { Category, CategoryId, GitHubRepoCard, NotesByRepo, ThemeMode } from '../types'
 
 const canUseStorage = (): boolean => typeof window !== 'undefined' && Boolean(window.localStorage)
 
@@ -92,4 +93,25 @@ export const saveSelectedCategoryId = (categoryId: CategoryId): void => {
   }
 
   window.localStorage.setItem(SELECTED_CATEGORY_STORAGE_KEY, categoryId)
+}
+
+export const loadThemeMode = (): ThemeMode | null => {
+  if (!canUseStorage()) {
+    return null
+  }
+
+  const value = window.localStorage.getItem(THEME_STORAGE_KEY)
+  if (value === 'light' || value === 'dark') {
+    return value
+  }
+
+  return null
+}
+
+export const saveThemeMode = (mode: ThemeMode): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.setItem(THEME_STORAGE_KEY, mode)
 }

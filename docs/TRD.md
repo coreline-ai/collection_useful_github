@@ -15,9 +15,12 @@
   - 수동 번역 요청(버튼 트리거 시)
   - GLM 우선, OpenAI fallback
 - `client/src/storage/localStorage.ts`
-  - 카드/메모 저장
+  - 카드/메모/카테고리/테마 저장
 - `client/src/storage/detailCache.ts`
   - 상세 캐시 저장/조회/TTL 정리
+- `client/src/utils/theme.ts`
+  - OS 다크모드 감지
+  - 저장값 + 시스템값 기반 초기 테마 결정
 - `client/src/components/RepoDetailModal.tsx`
   - 상세 탭 UI
   - 수동 번역 버튼/원문 토글
@@ -52,6 +55,17 @@ RepoDetailCacheEntry {
   detail: RepoDetailData
 }
 ```
+
+### 3.4 테마
+```ts
+ThemeMode = 'light' | 'dark'
+```
+
+- 저장 키: `github_theme_mode_v1`
+- 초기 로딩:
+  1. 저장값 확인
+  2. 저장값 없으면 `matchMedia('(prefers-color-scheme: dark)')` 확인
+  3. 최종값을 `document.documentElement.dataset.theme`에 반영
 
 ## 4. 캐시 아키텍처
 - 저장 키: `github_repo_detail_cache_v1`
@@ -95,6 +109,8 @@ RepoDetailCacheEntry {
 - 마크다운 렌더 및 sanitize 테스트
 - 번역 서비스 fallback 테스트
 - App 통합 테스트(등록/중복/상세/메모)
+- 테마 유틸 단위 테스트(저장값 우선/OS 감지)
+- 테마 저장 유틸 테스트(localStorage 손상값 fallback)
 
 ## 9. 운영 가이드
 - Rate limit 완화를 위해 `VITE_GITHUB_TOKEN` 설정 권장

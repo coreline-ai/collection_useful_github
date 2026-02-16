@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { THEME_STORAGE_KEY } from './constants'
 import type { GitHubRepoCard, RepoDetailData } from './types'
 
 vi.mock('./services/github', () => ({
@@ -48,12 +49,50 @@ const mockDetail: RepoDetailData = {
   ],
 }
 
+const mockMatchMedia = (matches: boolean) => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation(() => ({
+      matches,
+      media: '(prefers-color-scheme: dark)',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+}
+
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    mockMatchMedia(false)
     vi.mocked(fetchRepoDetail).mockResolvedValue(mockDetail)
     vi.mocked(fetchLatestCommitSha).mockResolvedValue('abc123')
+  })
+
+  it('uses system dark mode on first load when no saved theme', () => {
+    mockMatchMedia(true)
+
+    render(<App />)
+
+    expect(document.documentElement.dataset.theme).toBe('dark')
+  })
+
+  it('uses saved theme over system preference and toggles with persistence', () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
+    mockMatchMedia(true)
+
+    render(<App />)
+
+    expect(document.documentElement.dataset.theme).toBe('light')
+
+    fireEvent.click(screen.getByRole('button', { name: '다크 테마 켜기' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
   })
 
   it('adds repo card and blocks duplicate', async () => {
@@ -80,24 +119,21 @@ describe('App', () => {
   })
 
   it('shows input only in main category', async () => {
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('프론트엔드')
-
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: '카테고리 설정' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 카테고리 생성' }))
+    fireEvent.change(screen.getByLabelText('새 카테고리 이름'), { target: { value: '프론트엔드' } })
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 생성' }))
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정 닫기' }))
 
     expect(await screen.findByRole('button', { name: '프론트엔드' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '프론트엔드' }))
 
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
     expect(screen.getByText('저장소 추가는 메인 카테고리에서만 가능합니다.')).toBeInTheDocument()
-
-    promptSpy.mockRestore()
   })
 
   it('moves card to another category from card menu', async () => {
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('프론트엔드')
     vi.mocked(fetchRepo).mockResolvedValue(mockCard)
 
     render(<App />)
@@ -109,7 +145,9 @@ describe('App', () => {
     await screen.findByText('react')
 
     fireEvent.click(screen.getByRole('button', { name: '카테고리 설정' }))
-    fireEvent.click(screen.getByRole('button', { name: '+ 카테고리 생성' }))
+    fireEvent.change(screen.getByLabelText('새 카테고리 이름'), { target: { value: '프론트엔드' } })
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 생성' }))
+    fireEvent.click(screen.getByRole('button', { name: '카테고리 설정 닫기' }))
 
     fireEvent.click(screen.getByRole('button', { name: '메인' }))
     const moveTrigger = screen.getByRole('button', { name: '카테고리 이동' })
@@ -122,8 +160,6 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '프론트엔드' }))
     expect(await screen.findByText('react')).toBeInTheDocument()
-
-    promptSpy.mockRestore()
   })
 
   it('opens detail modal and adds note', async () => {

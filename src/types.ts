@@ -1,3 +1,5 @@
+export type ThemeMode = 'light' | 'dark'
+
 export type CategoryId = 'main' | 'warehouse' | string
 
 export type Category = {

@@ -1,19 +1,111 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 :root {
-  --text-main: #102849;
-  --text-subtle: #375f90;
-  --text-muted: #4d6586;
-  --bg-top: #eaf5ff;
-  --bg-bottom: #f7fbff;
+  --color-bg-page: #ffffff;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f6f8fb;
+  --color-surface-elevated: #fbfdff;
+  --color-text-primary: #102849;
+  --color-text-secondary: #375f90;
+  --color-text-muted: #4d6586;
+  --color-border: rgba(17, 42, 82, 0.2);
+  --color-border-strong: rgba(17, 42, 82, 0.32);
+  --color-accent: #1f4e89;
+  --color-accent-strong: #2f7b96;
+  --color-accent-on: #f8fbff;
+  --color-accent-soft: rgba(236, 246, 255, 0.95);
+  --color-focus-ring: rgba(33, 93, 148, 0.35);
+  --color-danger: #94122b;
+  --color-danger-bg: rgba(255, 242, 244, 0.95);
+  --color-info-bg: rgba(225, 242, 255, 0.95);
+  --color-info-text: #1f6298;
+  --color-warning-bg: rgba(255, 242, 225, 0.95);
+  --color-warning-text: #925b1f;
+  --color-success-bg: rgba(232, 241, 229, 0.95);
+  --color-success-text: #3c6d37;
+  --color-overlay: rgba(4, 14, 24, 0.64);
+  --color-readme-panel-bg: #0f1f33;
+  --color-readme-panel-text: #dbe8f8;
+  --color-readme-link: #9ed0ff;
+  --color-readme-link-hover: #c2e3ff;
+  --color-readme-anchor: #88b9e9;
+  --color-readme-table-header-bg: rgba(164, 201, 239, 0.18);
+  --color-readme-table-cell-bg: rgba(12, 32, 53, 0.42);
+  --color-readme-border: rgba(191, 216, 242, 0.26);
+  --color-readme-divider: rgba(191, 216, 242, 0.28);
+  --color-readme-inline-code-bg: rgba(148, 189, 230, 0.16);
+  --color-readme-pre-border: rgba(180, 208, 238, 0.22);
+  --color-readme-pre-bg: rgba(4, 11, 20, 0.48);
+  --color-readme-image-bg: rgba(4, 11, 20, 0.25);
+  --color-surface-soft-blue: rgba(234, 244, 250, 0.8);
+  --color-surface-soft-accent: rgba(18, 66, 125, 0.12);
+  --color-surface-soft-accent-2: rgba(235, 246, 255, 0.92);
+  --color-surface-soft-elevated: rgba(237, 245, 252, 0.78);
+  --color-hero-gradient: linear-gradient(115deg, var(--color-surface-1), rgba(241, 249, 255, 0.9));
+  --color-shadow-hero: 0 24px 60px -42px rgba(10, 33, 68, 0.65);
+  --color-shadow-popover: 0 10px 25px -18px rgba(18, 47, 92, 0.95);
+  --color-shadow-modal: 0 28px 64px -30px rgba(0, 15, 34, 0.85);
+
+  /* Backward-compatible aliases used throughout App.css */
+  --text-main: var(--color-text-primary);
+  --text-subtle: var(--color-text-secondary);
+  --text-muted: var(--color-text-muted);
+
   font-family: 'IBM Plex Sans', sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color: var(--text-main);
+  color: var(--color-text-primary);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme='dark'] {
+  --color-bg-page: #000000;
+  --color-surface-1: #000000;
+  --color-surface-2: #050505;
+  --color-surface-elevated: #050505;
+  --color-text-primary: #f3f6fb;
+  --color-text-secondary: #bfd1e8;
+  --color-text-muted: #95abc5;
+  --color-border: rgba(176, 195, 219, 0.3);
+  --color-border-strong: rgba(196, 213, 235, 0.42);
+  --color-accent: #6fa7ff;
+  --color-accent-strong: #9ed0ff;
+  --color-accent-on: #04070b;
+  --color-accent-soft: rgba(111, 167, 255, 0.2);
+  --color-focus-ring: rgba(143, 194, 255, 0.45);
+  --color-danger: #ff7b94;
+  --color-danger-bg: rgba(87, 22, 33, 0.45);
+  --color-info-bg: rgba(32, 84, 131, 0.42);
+  --color-info-text: #9fd0ff;
+  --color-warning-bg: rgba(104, 67, 26, 0.45);
+  --color-warning-text: #ffd19b;
+  --color-success-bg: rgba(45, 86, 43, 0.45);
+  --color-success-text: #9fdca0;
+  --color-overlay: rgba(0, 0, 0, 0.82);
+  --color-readme-panel-bg: #050505;
+  --color-readme-panel-text: #e8edf7;
+  --color-readme-link: #8ac0ff;
+  --color-readme-link-hover: #b5d8ff;
+  --color-readme-anchor: #8ac0ff;
+  --color-readme-table-header-bg: rgba(111, 167, 255, 0.15);
+  --color-readme-table-cell-bg: rgba(255, 255, 255, 0.03);
+  --color-readme-border: rgba(164, 196, 240, 0.26);
+  --color-readme-divider: rgba(164, 196, 240, 0.24);
+  --color-readme-inline-code-bg: rgba(111, 167, 255, 0.18);
+  --color-readme-pre-border: rgba(164, 196, 240, 0.24);
+  --color-readme-pre-bg: rgba(255, 255, 255, 0.04);
+  --color-readme-image-bg: rgba(255, 255, 255, 0.03);
+  --color-surface-soft-blue: rgba(111, 167, 255, 0.14);
+  --color-surface-soft-accent: rgba(111, 167, 255, 0.17);
+  --color-surface-soft-accent-2: rgba(111, 167, 255, 0.16);
+  --color-surface-soft-elevated: rgba(111, 167, 255, 0.12);
+  --color-hero-gradient: linear-gradient(115deg, #000000, #050505);
+  --color-shadow-hero: none;
+  --color-shadow-popover: none;
+  --color-shadow-modal: none;
 }
 
 * {
@@ -24,19 +116,17 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background:
-    radial-gradient(1200px 650px at 8% -14%, rgba(84, 156, 224, 0.22), transparent 62%),
-    radial-gradient(800px 450px at 93% 6%, rgba(109, 168, 194, 0.2), transparent 54%),
-    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
 }
 
 a {
-  color: #215d94;
+  color: var(--color-accent);
   text-underline-offset: 3px;
 }
 
 a:hover {
-  color: #173f69;
+  color: var(--color-accent-strong);
 }
 
 button,

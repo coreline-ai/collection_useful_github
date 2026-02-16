@@ -3,6 +3,7 @@ export const NOTES_STORAGE_KEY = 'github_notes_v1'
 export const DETAIL_CACHE_STORAGE_KEY = 'github_repo_detail_cache_v1'
 export const CATEGORIES_STORAGE_KEY = 'github_categories_v1'
 export const SELECTED_CATEGORY_STORAGE_KEY = 'github_selected_category_v1'
+export const THEME_STORAGE_KEY = 'github_theme_mode_v1'
 
 export const CARDS_PER_PAGE = 12
 export const GRID_COLUMNS_DESKTOP = 4

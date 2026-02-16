@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import './App.css'
+import { CategorySettingsModal } from './components/CategorySettingsModal'
 import { Pagination } from './components/Pagination'
 import { RepoCard } from './components/RepoCard'
 import { RepoDetailModal } from './components/RepoDetailModal'
@@ -15,12 +16,15 @@ import { removeRepoDetailCache } from './storage/detailCache'
 import {
   saveCards,
   saveCategories,
+  saveThemeMode,
   saveNotes,
   saveSelectedCategoryId,
+  loadThemeMode,
 } from './storage/localStorage'
-import type { Category, RepoNote } from './types'
+import type { Category, RepoNote, ThemeMode } from './types'
 import { pageCount, paginate } from './utils/paginate'
 import { parseGitHubRepoUrl } from './utils/parseGitHubRepoUrl'
+import { resolveInitialTheme } from './utils/theme'
 
 const createNoteId = (): string => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -58,11 +62,11 @@ const hasDuplicateCategoryName = (
 
 function App() {
   const [state, dispatch] = useReducer(dashboardReducer, undefined, initialState)
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => resolveInitialTheme(loadThemeMode()))
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const settingsMenuRef = useRef<HTMLDivElement | null>(null)
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -87,23 +91,6 @@ function App() {
   )
 
   useEffect(() => {
-    if (!isSettingsOpen) {
-      return
-    }
-
-    const handleOutsideClick = (event: MouseEvent) => {
-      if (settingsMenuRef.current?.contains(event.target as Node)) {
-        return
-      }
-
-      setIsSettingsOpen(false)
-    }
-
-    window.addEventListener('mousedown', handleOutsideClick)
-    return () => window.removeEventListener('mousedown', handleOutsideClick)
-  }, [isSettingsOpen])
-
-  useEffect(() => {
     saveCards(state.cards)
   }, [state.cards])
 
@@ -118,6 +105,11 @@ function App() {
   useEffect(() => {
     saveSelectedCategoryId(state.selectedCategoryId)
   }, [state.selectedCategoryId])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode
+    saveThemeMode(themeMode)
+  }, [themeMode])
 
   useEffect(() => {
     const maxPage = pageCount(cardsInSelectedCategory.length, CARDS_PER_PAGE)
@@ -202,28 +194,22 @@ function App() {
     dispatch({ type: 'addNote', payload: note })
   }
 
-  const handleCreateCategory = () => {
-    const input = window.prompt('새 카테고리 이름을 입력해 주세요.')
-
-    if (input === null) {
-      return
-    }
-
+  const handleCreateCategory = (input: string): boolean => {
     const name = normalizeCategoryName(input)
 
     if (!name) {
       setCategoryMessage('카테고리 이름을 입력해 주세요.')
-      return
+      return false
     }
 
     if (name.length > CATEGORY_NAME_MAX_LENGTH) {
       setCategoryMessage(`카테고리 이름은 최대 ${CATEGORY_NAME_MAX_LENGTH}자까지 가능합니다.`)
-      return
+      return false
     }
 
     if (hasDuplicateCategoryName(state.categories, name)) {
       setCategoryMessage('이미 존재하는 카테고리 이름입니다.')
-      return
+      return false
     }
 
     dispatch({
@@ -239,42 +225,34 @@ function App() {
     })
 
     setCategoryMessage('카테고리를 생성했습니다.')
+    return true
   }
 
-  const handleRenameCategory = (category: Category) => {
-    const input = window.prompt('카테고리 이름을 입력해 주세요.', category.name)
-
-    if (input === null) {
-      return
-    }
-
+  const handleRenameCategory = (category: Category, input: string): boolean => {
     const name = normalizeCategoryName(input)
 
     if (!name) {
       setCategoryMessage('카테고리 이름을 입력해 주세요.')
-      return
+      return false
     }
 
     if (name.length > CATEGORY_NAME_MAX_LENGTH) {
       setCategoryMessage(`카테고리 이름은 최대 ${CATEGORY_NAME_MAX_LENGTH}자까지 가능합니다.`)
-      return
+      return false
     }
 
     if (hasDuplicateCategoryName(state.categories, name, category.id)) {
       setCategoryMessage('이미 존재하는 카테고리 이름입니다.')
-      return
+      return false
     }
 
     dispatch({ type: 'renameCategory', payload: { categoryId: category.id, name } })
     setCategoryMessage('카테고리 이름을 변경했습니다.')
+    return true
   }
 
   const handleDeleteCategory = (category: Category) => {
     if (category.isSystem) {
-      return
-    }
-
-    if (!window.confirm(`${category.name} 카테고리를 삭제할까요? 포함된 저장소는 창고로 이동합니다.`)) {
       return
     }
 
@@ -310,47 +288,31 @@ function App() {
             </button>
           ))}
 
-          <div className="category-settings" ref={settingsMenuRef}>
+          <div className="category-settings">
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={() => setThemeMode((current) => (current === 'light' ? 'dark' : 'light'))}
+              aria-label={themeMode === 'light' ? '다크 테마 켜기' : '라이트 테마 켜기'}
+              title={themeMode === 'light' ? '다크 테마 켜기' : '라이트 테마 켜기'}
+            >
+              {themeMode === 'light' ? '🌙' : '☀'}
+            </button>
             <button
               type="button"
               className="settings-trigger"
-              onClick={() => setIsSettingsOpen((current) => !current)}
+              onClick={() => {
+                setCategoryMessage(null)
+                setIsCategoryModalOpen(true)
+              }}
               aria-label="카테고리 설정"
             >
               ⚙
             </button>
-
-            {isSettingsOpen ? (
-              <div className="settings-popover">
-                <button type="button" className="settings-create" onClick={handleCreateCategory}>
-                  + 카테고리 생성
-                </button>
-
-                <div className="settings-list">
-                  {state.categories.map((category) => (
-                    <div key={category.id} className="settings-item">
-                      <span>{category.name}</span>
-                      <div>
-                        <button type="button" onClick={() => handleRenameCategory(category)}>
-                          이름변경
-                        </button>
-                        <button
-                          type="button"
-                          disabled={category.isSystem}
-                          onClick={() => handleDeleteCategory(category)}
-                        >
-                          삭제
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
 
-        {categoryMessage ? <p className="category-message">{categoryMessage}</p> : null}
+        {categoryMessage && !isCategoryModalOpen ? <p className="category-message">{categoryMessage}</p> : null}
       </section>
 
       {state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID ? (
@@ -399,6 +361,17 @@ function App() {
         notes={selectedRepo ? state.notesByRepo[selectedRepo.id] ?? [] : []}
         onClose={() => dispatch({ type: 'closeModal' })}
         onAddNote={handleAddNote}
+      />
+
+      <CategorySettingsModal
+        open={isCategoryModalOpen}
+        categories={state.categories}
+        maxNameLength={CATEGORY_NAME_MAX_LENGTH}
+        message={categoryMessage}
+        onClose={() => setIsCategoryModalOpen(false)}
+        onCreateCategory={handleCreateCategory}
+        onRenameCategory={handleRenameCategory}
+        onDeleteCategory={handleDeleteCategory}
       />
     </div>
   )
