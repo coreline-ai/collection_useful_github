@@ -21,6 +21,7 @@ export const isRemoteSyncConnectionWarning = (message: string | null | undefined
   return (
     message.startsWith('원격 저장 연결이 불안정합니다.') ||
     message.includes('로컬 저장으로 전환했습니다.') ||
-    message.includes('원격 저장 연결이 계속 실패해')
+    message.includes('원격 저장 연결이 계속 실패해') ||
+    message.includes('원격 DB 연결 문제로 현재')
   )
 }

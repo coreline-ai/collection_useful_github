@@ -2,6 +2,10 @@
 
 업데이트 기준: 2026-02-16
 
+## 관련 문서
+
+- [WEBAPP ESSENTIAL CHECKLIST + 실행 계획](./WEBAPP_ESSENTIAL_CHECKLIST_PLAN.md)
+
 ## 1. 현재 구현 상태(코드 기준)
 
 ### 완료

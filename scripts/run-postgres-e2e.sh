@@ -125,4 +125,4 @@ fi
 cd "${ROOT_DIR}"
 RUN_POSTGRES_E2E=true \
 VITE_POSTGRES_SYNC_API_BASE_URL="${API_BASE_URL}" \
-npx vitest run --maxWorkers=1 src/app/postgresDashboardRoundtrip.e2e.test.tsx src/app/postgresSync.e2e.test.tsx src/app/postgresYoutubeSync.e2e.test.tsx src/app/postgresBookmarkSync.e2e.test.tsx src/app/postgresBookmarkMetadataApi.e2e.test.ts src/app/postgresSearchRanking.e2e.test.tsx
+npx vitest run --maxWorkers=1 src/app/postgresDashboardRoundtrip.e2e.test.tsx src/app/postgresSync.e2e.test.tsx src/app/postgresYoutubeSync.e2e.test.tsx src/app/postgresBookmarkSync.e2e.test.tsx src/app/postgresBookmarkMetadataApi.e2e.test.ts src/app/postgresSearchRanking.e2e.test.tsx src/app/postgresGithubHistory.e2e.test.ts

@@ -105,7 +105,11 @@ const DEV_DUMMY_CARD: GitHubRepoCard = {
   addedAt: new Date().toISOString(),
 }
 
-const getInitialCards = (): GitHubRepoCard[] => {
+const getInitialCards = (useLocalCache: boolean): GitHubRepoCard[] => {
+  if (!useLocalCache) {
+    return []
+  }
+
   const storedCards = loadCards()
 
   if (storedCards.length > 0) {
@@ -142,16 +146,21 @@ type DashboardAction =
       }
     }
 
-export const initialState = (): DashboardState => {
-  const categories = ensureCategories(loadCategories())
-  const selectedCategoryId = loadSelectedCategoryId()
+type InitialStateOptions = {
+  useLocalCache?: boolean
+}
+
+export const initialState = (options: InitialStateOptions = {}): DashboardState => {
+  const useLocalCache = options.useLocalCache ?? true
+  const categories = ensureCategories(useLocalCache ? loadCategories() : [])
+  const selectedCategoryId = useLocalCache ? loadSelectedCategoryId() : DEFAULT_MAIN_CATEGORY_ID
   const resolvedSelectedCategoryId = categories.some((category) => category.id === selectedCategoryId)
     ? (selectedCategoryId as CategoryId)
     : DEFAULT_MAIN_CATEGORY_ID
 
   return {
-    cards: migrateCards(getInitialCards(), categories),
-    notesByRepo: loadNotes(),
+    cards: migrateCards(getInitialCards(useLocalCache), categories),
+    notesByRepo: useLocalCache ? loadNotes() : {},
     categories,
     selectedCategoryId: resolvedSelectedCategoryId,
     currentPage: 1,

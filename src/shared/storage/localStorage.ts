@@ -111,6 +111,17 @@ export const saveSelectedCategoryId = (categoryId: CategoryId): void => {
   window.localStorage.setItem(SELECTED_CATEGORY_STORAGE_KEY, categoryId)
 }
 
+export const clearGithubDashboardCache = (): void => {
+  if (!canUseStorage()) {
+    return
+  }
+
+  window.localStorage.removeItem(CARDS_STORAGE_KEY)
+  window.localStorage.removeItem(NOTES_STORAGE_KEY)
+  window.localStorage.removeItem(CATEGORIES_STORAGE_KEY)
+  window.localStorage.removeItem(SELECTED_CATEGORY_STORAGE_KEY)
+}
+
 export const loadThemeMode = (): ThemeMode | null => {
   if (!canUseStorage()) {
     return null

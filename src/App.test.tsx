@@ -200,7 +200,7 @@ describe('App', () => {
     expect(document.documentElement.dataset.theme).toBe('dark')
   })
 
-  it('uses saved theme over system preference and toggles with persistence', () => {
+  it('uses saved theme over system preference and toggles with persistence', async () => {
     window.localStorage.setItem(THEME_STORAGE_KEY, 'light')
     mockMatchMedia(true)
 
@@ -208,26 +208,26 @@ describe('App', () => {
 
     expect(document.documentElement.dataset.theme).toBe('light')
 
-    fireEvent.click(screen.getByRole('button', { name: '다크 테마 켜기' }))
+    fireEvent.click(await screen.findByRole('button', { name: '다크 테마 켜기' }))
     expect(document.documentElement.dataset.theme).toBe('dark')
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark')
   })
 
-  it('shows github section by default with local search input', () => {
+  it('shows github section by default with local search input', async () => {
     render(<App />)
 
     expect(screen.getByRole('tab', { name: '깃허브' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
-    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
+    expect(await screen.findByLabelText('GitHub 저장소 URL')).toBeInTheDocument()
+    expect(await screen.findByLabelText('등록 카드 검색')).toBeInTheDocument()
   })
 
-  it('switches to youtube board and hides github board', () => {
+  it('switches to youtube board and hides github board', async () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
 
-    expect(screen.getByLabelText('YouTube 영상 URL')).toBeInTheDocument()
-    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
+    expect(await screen.findByLabelText('YouTube 영상 URL')).toBeInTheDocument()
+    expect(await screen.findByLabelText('등록 카드 검색')).toBeInTheDocument()
     expect(screen.queryByLabelText('GitHub 저장소 URL')).not.toBeInTheDocument()
     expect(window.localStorage.getItem(TOP_SECTION_STORAGE_KEY)).toBe('youtube')
   })
@@ -236,7 +236,7 @@ describe('App', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('tab', { name: '유튜브' }))
-    fireEvent.change(screen.getByLabelText('YouTube 영상 URL'), {
+    fireEvent.change(await screen.findByLabelText('YouTube 영상 URL'), {
       target: { value: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' },
     })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
@@ -244,7 +244,7 @@ describe('App', () => {
     await screen.findByText('Never Gonna Give You Up')
     expect(screen.getByText('Rick Astley')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('등록 카드 검색'), { target: { value: 'rick' } })
+    fireEvent.change(await screen.findByLabelText('등록 카드 검색'), { target: { value: 'rick' } })
     expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
     expect(screen.getByText('Never Gonna Give You Up')).toBeInTheDocument()
   })
@@ -253,7 +253,7 @@ describe('App', () => {
     render(<App />)
 
     fireEvent.click(screen.getByRole('tab', { name: '북마크' }))
-    fireEvent.change(screen.getByLabelText('북마크 URL'), {
+    fireEvent.change(await screen.findByLabelText('북마크 URL'), {
       target: { value: 'https://openai.com/research' },
     })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
@@ -262,7 +262,7 @@ describe('App', () => {
     expect(screen.getByText('openai.com', { selector: '.repo-owner' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '북마크 링크 열기' })).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('등록 카드 검색'), { target: { value: 'openai' } })
+    fireEvent.change(await screen.findByLabelText('등록 카드 검색'), { target: { value: 'openai' } })
     expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
     expect(screen.getByText('OpenAI Research')).toBeInTheDocument()
   })
@@ -305,16 +305,20 @@ describe('App', () => {
     })
 
     expect(saveGithubDashboardToRemote).not.toHaveBeenCalled()
+    expect(
+      screen.getAllByText(/원격 DB 연결 문제로 현재 GitHub 보드는 읽기 전용입니다\./).length,
+    ).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: /추가|조회 중\.\.\./ })).toBeDisabled()
   })
 
-  it('restores selected top section from storage', () => {
+  it('restores selected top section from storage', async () => {
     window.localStorage.setItem(TOP_SECTION_STORAGE_KEY, 'bookmark')
 
     render(<App />)
 
     expect(screen.getByRole('tab', { name: '북마크' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByLabelText('북마크 URL')).toBeInTheDocument()
-    expect(screen.getByLabelText('등록 카드 검색')).toBeInTheDocument()
+    expect(await screen.findByLabelText('북마크 URL')).toBeInTheDocument()
+    expect(await screen.findByLabelText('등록 카드 검색')).toBeInTheDocument()
   })
 
   it('adds repo card and blocks duplicate', async () => {
@@ -322,7 +326,7 @@ describe('App', () => {
 
     render(<App />)
 
-    const input = screen.getByLabelText('GitHub 저장소 URL')
+    const input = await screen.findByLabelText('GitHub 저장소 URL')
     fireEvent.change(input, { target: { value: 'facebook/react' } })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
 
@@ -345,7 +349,7 @@ describe('App', () => {
 
     render(<App />)
 
-    fireEvent.change(screen.getByLabelText('GitHub 저장소 URL'), {
+    fireEvent.change(await screen.findByLabelText('GitHub 저장소 URL'), {
       target: { value: 'https://github.com/facebook/react' },
     })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
@@ -363,13 +367,13 @@ describe('App', () => {
     expect(moveMenu).not.toBeNull()
     fireEvent.click(within(moveMenu as HTMLElement).getByRole('button', { name: '프론트엔드' }))
 
-    fireEvent.change(screen.getByLabelText('GitHub 저장소 URL'), {
+    fireEvent.change(await screen.findByLabelText('GitHub 저장소 URL'), {
       target: { value: 'https://github.com/vuejs/core' },
     })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
     await screen.findByText('core')
 
-    const searchInput = screen.getByLabelText('등록 카드 검색')
+    const searchInput = await screen.findByLabelText('등록 카드 검색')
     fireEvent.change(searchInput, { target: { value: 'react' } })
 
     expect(screen.getByText('검색 중에는 전체 카테고리 카드에서 결과를 표시합니다.')).toBeInTheDocument()
@@ -404,7 +408,7 @@ describe('App', () => {
 
     render(<App />)
 
-    fireEvent.change(screen.getByLabelText('GitHub 저장소 URL'), {
+    fireEvent.change(await screen.findByLabelText('GitHub 저장소 URL'), {
       target: { value: 'https://github.com/facebook/react' },
     })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))

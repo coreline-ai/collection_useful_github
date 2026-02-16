@@ -67,11 +67,27 @@ const loadLocalDashboard = async () => {
 const restore = async () => {
   try {
     const dashboard = await loadLocalDashboard()
+    const currentRemote = await fetch(`${apiBase}/api/github/dashboard`).then((response) => {
+      if (!response.ok) {
+        throw new Error(`원격 대시보드 조회 실패 (${response.status})`)
+      }
+
+      return response.json()
+    })
+    const expectedRevision =
+      typeof currentRemote?.dashboard?.revision === 'number' && Number.isFinite(currentRemote.dashboard.revision)
+        ? currentRemote.dashboard.revision
+        : null
 
     const response = await fetch(`${apiBase}/api/github/dashboard`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dashboard }),
+      body: JSON.stringify({
+        dashboard,
+        expectedRevision,
+        eventType: 'restore',
+        allowDestructiveSync: true,
+      }),
     })
 
     if (!response.ok) {
@@ -92,6 +108,7 @@ const restore = async () => {
           restoredCards: dashboard.cards.length,
           restoredNotes: noteCount,
           dbItems: verify.items?.length ?? 0,
+          expectedRevision,
           apiBase,
         },
         null,

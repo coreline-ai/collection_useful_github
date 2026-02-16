@@ -112,3 +112,17 @@ CREATE TABLE IF NOT EXISTS unified_meta (
   value JSONB NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS github_dashboard_history (
+  id BIGSERIAL PRIMARY KEY,
+  revision INTEGER NOT NULL CHECK (revision >= 1),
+  event_type TEXT NOT NULL CHECK (event_type IN ('save', 'rollback', 'import', 'restore')),
+  dashboard JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_dashboard_history_revision
+  ON github_dashboard_history (revision DESC);
+
+CREATE INDEX IF NOT EXISTS idx_github_dashboard_history_created
+  ON github_dashboard_history (created_at DESC);

@@ -220,6 +220,7 @@ export const BookmarkFeatureEntry = ({
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const cardsRef = useRef(state.cards)
   const remoteRevisionRef = useRef<number | null>(null)
+  const skipNextRemoteSaveRef = useRef(false)
   const saveDebounceTimeoutRef = useRef<number | null>(null)
   const saveInFlightRef = useRef(false)
   const pendingRemotePayloadRef = useRef<BookmarkSavePayload | null>(null)
@@ -421,6 +422,7 @@ export const BookmarkFeatureEntry = ({
             typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
               ? remoteDashboard.revision
               : null
+          skipNextRemoteSaveRef.current = true
           dispatch({
             type: 'hydrateDashboard',
             payload: remoteDashboard,
@@ -461,6 +463,13 @@ export const BookmarkFeatureEntry = ({
         selectedCategoryId: state.selectedCategoryId,
       }
 
+      if (skipNextRemoteSaveRef.current) {
+        skipNextRemoteSaveRef.current = false
+        persistLocalSnapshot(payload)
+        return
+      }
+
+      persistLocalSnapshot(payload)
       enqueueRemoteSave(payload)
       return
     }
@@ -517,6 +526,7 @@ export const BookmarkFeatureEntry = ({
               typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
                 ? remoteDashboard.revision
                 : null
+            skipNextRemoteSaveRef.current = true
             dispatch({
               type: 'hydrateDashboard',
               payload: remoteDashboard,

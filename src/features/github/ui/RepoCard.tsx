@@ -6,6 +6,7 @@ type RepoCardProps = {
   repo: GitHubRepoCard
   categories: Category[]
   categoryName?: string | null
+  readOnly?: boolean
   onOpenDetail: (repoId: string) => void
   onDelete: (repoId: string) => void
   onMove: (repoId: string, targetCategoryId: CategoryId) => void
@@ -18,7 +19,7 @@ const Stat = ({ label, value }: { label: string; value: number }) => (
   </div>
 )
 
-export const RepoCard = ({ repo, categories, categoryName, onOpenDetail, onDelete, onMove }: RepoCardProps) => {
+export const RepoCard = ({ repo, categories, categoryName, readOnly = false, onOpenDetail, onDelete, onMove }: RepoCardProps) => {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
 
@@ -54,6 +55,7 @@ export const RepoCard = ({ repo, categories, categoryName, onOpenDetail, onDelet
               type="button"
               className="move-button"
               aria-label="카테고리 이동"
+              disabled={readOnly}
               onClick={(event) => {
                 event.stopPropagation()
                 setIsMoveMenuOpen((current) => !current)
@@ -68,7 +70,7 @@ export const RepoCard = ({ repo, categories, categoryName, onOpenDetail, onDelet
                   <button
                     key={category.id}
                     type="button"
-                    disabled={category.id === repo.categoryId}
+                    disabled={readOnly || category.id === repo.categoryId}
                     onClick={() => {
                       onMove(repo.id, category.id)
                       setIsMoveMenuOpen(false)
@@ -84,6 +86,7 @@ export const RepoCard = ({ repo, categories, categoryName, onOpenDetail, onDelet
           <button
             type="button"
             className="delete-button"
+            disabled={readOnly}
             onClick={(event) => {
               event.stopPropagation()
               onDelete(repo.id)

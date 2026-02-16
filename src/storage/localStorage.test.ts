@@ -12,6 +12,7 @@ import {
   YOUTUBE_SELECTED_CATEGORY_STORAGE_KEY,
 } from '../constants'
 import {
+  clearGithubDashboardCache,
   loadCards,
   loadCategories,
   loadNotes,
@@ -164,6 +165,43 @@ describe('localStorage dashboard data', () => {
     expect(loadCards()).toEqual([])
     expect(loadNotes()).toEqual({})
     expect(loadCategories()).toEqual([])
+  })
+
+  it('clears github dashboard cache keys', () => {
+    saveCards([
+      {
+        id: 'owner/repo',
+        categoryId: 'main',
+        owner: 'owner',
+        repo: 'repo',
+        fullName: 'owner/repo',
+        description: '',
+        summary: '',
+        htmlUrl: 'https://github.com/owner/repo',
+        homepage: null,
+        language: null,
+        stars: 0,
+        forks: 0,
+        watchers: 0,
+        openIssues: 0,
+        topics: [],
+        license: null,
+        defaultBranch: 'main',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        addedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ])
+    saveNotes({ 'owner/repo': [] })
+    saveCategories([{ id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' }])
+    saveSelectedCategoryId('main')
+
+    clearGithubDashboardCache()
+
+    expect(window.localStorage.getItem(CARDS_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(NOTES_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(CATEGORIES_STORAGE_KEY)).toBeNull()
+    expect(window.localStorage.getItem(SELECTED_CATEGORY_STORAGE_KEY)).toBeNull()
   })
 })
 

@@ -1,3 +1,4 @@
+import compression from 'compression'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
@@ -21,6 +22,12 @@ const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeou
   : 12000
 const bookmarkFetchTimeoutMs = Number(process.env.BOOKMARK_FETCH_TIMEOUT_MS || 10_000)
 const bookmarkMaxResponseBytes = Number(process.env.BOOKMARK_MAX_RESPONSE_BYTES || 1_048_576)
+const webVitalsEnabled = (process.env.WEB_VITALS_ENABLED || 'false').trim().toLowerCase() === 'true'
+const githubSaveMaxDropRatioRaw = Number(process.env.GITHUB_SAVE_MAX_DROP_RATIO || 0.34)
+const githubSaveMaxDropRatio =
+  Number.isFinite(githubSaveMaxDropRatioRaw) && githubSaveMaxDropRatioRaw >= 0 && githubSaveMaxDropRatioRaw <= 1
+    ? githubSaveMaxDropRatioRaw
+    : 0.34
 
 const DEFAULT_CATEGORIES = [
   {
@@ -39,6 +46,7 @@ const DEFAULT_CATEGORIES = [
 
 const app = express()
 app.use(express.json({ limit: '8mb' }))
+app.use(compression({ threshold: 1024 }))
 
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
@@ -64,9 +72,60 @@ app.use((req, _res, next) => {
   next()
 })
 
+const applyApiCacheControl = (req, res, next) => {
+  if (req.method !== 'GET' || !req.path.startsWith('/api/')) {
+    next()
+    return
+  }
+
+  if (
+    req.path.startsWith('/api/github/dashboard') ||
+    req.path.startsWith('/api/youtube/dashboard') ||
+    req.path.startsWith('/api/bookmark/dashboard') ||
+    req.path.startsWith('/api/admin/')
+  ) {
+    res.set('Cache-Control', 'no-store')
+    next()
+    return
+  }
+
+  if (req.path.startsWith('/api/search')) {
+    res.set('Cache-Control', 'private, max-age=15, stale-while-revalidate=15')
+    next()
+    return
+  }
+
+  if (req.path.startsWith('/api/youtube/videos/') || req.path.startsWith('/api/bookmark/metadata')) {
+    res.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
+    next()
+    return
+  }
+
+  res.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=30')
+  next()
+}
+
+app.use(applyApiCacheControl)
+
 const searchRateLimitMap = new Map()
 const SEARCH_LIMIT_WINDOW_MS = 60 * 1000
 const SEARCH_LIMIT_MAX = 60
+const SEARCH_RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+let searchRateLimitCleanupCounter = 0
+
+const cleanupSearchRateLimitMap = (now = Date.now()) => {
+  for (const [ip, entry] of searchRateLimitMap.entries()) {
+    if (now - entry.windowStart >= SEARCH_LIMIT_WINDOW_MS * 2) {
+      searchRateLimitMap.delete(ip)
+    }
+  }
+}
+
+setInterval(() => {
+  cleanupSearchRateLimitMap()
+}, SEARCH_RATE_LIMIT_CLEANUP_INTERVAL_MS).unref?.()
+const webVitalsSamples = []
+const WEB_VITALS_MAX_SAMPLES = 500
 
 const createHttpError = (status, message) => {
   const error = new Error(message)
@@ -82,6 +141,19 @@ const parseExpectedRevision = (value) => {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw createHttpError(400, 'invalid expectedRevision')
+  }
+
+  return parsed
+}
+
+const parsePositiveInt = (value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) => {
+  if (value === undefined || value === null || value === '') {
+    return fallback
+  }
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw createHttpError(400, 'invalid integer parameter')
   }
 
   return parsed
@@ -126,6 +198,10 @@ const requireAdminAuth = (req, _res, next) => {
 }
 
 const parseBoolean = (value, fallback = false) => {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
   if (typeof value !== 'string') {
     return fallback
   }
@@ -145,6 +221,11 @@ const parseBoolean = (value, fallback = false) => {
 const applySearchRateLimit = (req, _res, next) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown'
   const now = Date.now()
+  searchRateLimitCleanupCounter += 1
+  if (searchRateLimitCleanupCounter >= 200) {
+    searchRateLimitCleanupCounter = 0
+    cleanupSearchRateLimitMap(now)
+  }
   const entry = searchRateLimitMap.get(ip)
 
   if (!entry || now - entry.windowStart >= SEARCH_LIMIT_WINDOW_MS) {
@@ -784,11 +865,97 @@ const loadGithubDashboard = async () => {
   }
 }
 
-const persistGithubDashboard = async (dashboard, expectedRevision = null) => {
+const loadGithubDashboardHistory = async (limit = 30) => {
+  const parsedLimit = parsePositiveInt(limit, 30, { min: 1, max: 200 })
+  const result = await query(
+    `
+      SELECT id, revision, event_type AS "eventType", dashboard, created_at AS "createdAt"
+      FROM github_dashboard_history
+      ORDER BY id DESC
+      LIMIT $1
+    `,
+    [parsedLimit],
+  )
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    revision: Number(row.revision),
+    eventType: String(row.eventType),
+    createdAt: toIso(row.createdAt),
+    dashboard: row.dashboard && typeof row.dashboard === 'object' ? row.dashboard : null,
+  }))
+}
+
+const rollbackGithubDashboard = async (revision) => {
+  const targetRevision = parsePositiveInt(revision, null, { min: 1 })
+  if (targetRevision === null) {
+    throw createHttpError(400, 'revision is required')
+  }
+
+  const historyResult = await query(
+    `
+      SELECT id, revision, dashboard
+      FROM github_dashboard_history
+      WHERE revision = $1
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [targetRevision],
+  )
+
+  if (historyResult.rowCount === 0) {
+    throw createHttpError(404, '요청한 리비전의 GitHub 대시보드 이력을 찾을 수 없습니다.')
+  }
+
+  const historyRow = historyResult.rows[0]
+  const snapshotDashboard = normalizeDashboardPayload(historyRow.dashboard)
+  const revisionResult = await query(
+    `
+      SELECT value
+      FROM unified_meta
+      WHERE key = $1
+    `,
+    [DASHBOARD_META_KEY],
+  )
+  const expectedRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+  const persisted = await persistGithubDashboard(snapshotDashboard, expectedRevision, 'rollback', {
+    allowDestructiveSync: true,
+  })
+
+  return {
+    ...persisted,
+    restoredFromRevision: targetRevision,
+    historyId: Number(historyRow.id),
+  }
+}
+
+const GITHUB_HISTORY_EVENT_TYPES = new Set(['save', 'rollback', 'import', 'restore'])
+
+const parseGithubHistoryEventType = (value, fallback = 'save') => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return fallback
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!GITHUB_HISTORY_EVENT_TYPES.has(normalized)) {
+    throw createHttpError(400, 'invalid github history eventType')
+  }
+
+  return normalized
+}
+
+const persistGithubDashboard = async (
+  dashboard,
+  expectedRevision = null,
+  eventType = 'save',
+  { allowDestructiveSync = false } = {},
+) => {
   const normalized = normalizeDashboardPayload(dashboard)
   const items = toGithubUnifiedItems(normalized.cards)
   const itemIds = new Set(items.map((item) => item.id))
   const notes = buildNoteRecordsFromNotesByRepo(normalized.notesByRepo).filter((note) => itemIds.has(note.itemId))
+
+  const normalizedEventType = parseGithubHistoryEventType(eventType, 'save')
 
   const client = await getClient()
 
@@ -806,10 +973,36 @@ const persistGithubDashboard = async (dashboard, expectedRevision = null) => {
     )
     const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
 
+    if (revisionResult.rowCount > 0 && expectedRevision === null) {
+      throw createHttpError(409, '원격 대시보드 버전 정보가 없어 저장을 중단했습니다. 새로고침 후 다시 시도해 주세요.')
+    }
+
     if (expectedRevision !== null && expectedRevision !== currentRevision) {
       throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
     }
     const nextRevision = currentRevision + 1
+    const currentCountResult = await client.query(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM unified_items
+        WHERE provider = 'github'
+      `,
+    )
+    const currentCount = Number(currentCountResult.rows[0]?.count || 0)
+    const nextCount = items.length
+    const dropCount = Math.max(currentCount - nextCount, 0)
+    const dropRatio = currentCount > 0 ? dropCount / currentCount : 0
+    const hasSignificantDrop =
+      currentCount >= 6 &&
+      nextCount < currentCount &&
+      (dropRatio >= githubSaveMaxDropRatio || nextCount === 0)
+
+    if (!allowDestructiveSync && hasSignificantDrop) {
+      throw createHttpError(
+        409,
+        `GitHub 대시보드 보호 정책으로 저장이 차단되었습니다. 현재 ${currentCount}개에서 ${nextCount}개로 급감합니다.`,
+      )
+    }
 
     await client.query('DELETE FROM unified_items WHERE provider = $1', ['github'])
 
@@ -883,6 +1076,23 @@ const persistGithubDashboard = async (dashboard, expectedRevision = null) => {
         DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
       `,
       ['snapshot:github', JSON.stringify({ items: items.length, notes: notes.length })],
+    )
+
+    await client.query(
+      `
+        INSERT INTO github_dashboard_history (revision, event_type, dashboard, created_at)
+        VALUES ($1, $2, $3::jsonb, NOW())
+      `,
+      [
+        nextRevision,
+        normalizedEventType,
+        JSON.stringify({
+          cards: normalized.cards,
+          notesByRepo: normalized.notesByRepo,
+          categories: normalized.categories,
+          selectedCategoryId: normalized.selectedCategoryId,
+        }),
+      ],
     )
 
     await client.query('COMMIT')
@@ -973,6 +1183,10 @@ const persistYoutubeDashboard = async (dashboard, expectedRevision = null) => {
       [YOUTUBE_DASHBOARD_META_KEY],
     )
     const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+
+    if (revisionResult.rowCount > 0 && expectedRevision === null) {
+      throw createHttpError(409, '원격 대시보드 버전 정보가 없어 저장을 중단했습니다. 새로고침 후 다시 시도해 주세요.')
+    }
 
     if (expectedRevision !== null && expectedRevision !== currentRevision) {
       throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
@@ -1128,6 +1342,10 @@ const persistBookmarkDashboard = async (dashboard, expectedRevision = null) => {
       [BOOKMARK_DASHBOARD_META_KEY],
     )
     const currentRevision = revisionResult.rowCount ? parseMetaRevision(revisionResult.rows[0].value) : 0
+
+    if (revisionResult.rowCount > 0 && expectedRevision === null) {
+      throw createHttpError(409, '원격 대시보드 버전 정보가 없어 저장을 중단했습니다. 새로고침 후 다시 시도해 주세요.')
+    }
 
     if (expectedRevision !== null && expectedRevision !== currentRevision) {
       throw createHttpError(409, '원격 대시보드 버전 충돌이 발생했습니다.')
@@ -1991,7 +2209,31 @@ app.put('/api/github/dashboard', requireAdminAuth, async (req, res, next) => {
   try {
     const dashboard = normalizeDashboardPayload(req.body?.dashboard)
     const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
-    const result = await persistGithubDashboard(dashboard, expectedRevision)
+    const eventType = parseGithubHistoryEventType(req.body?.eventType, 'save')
+    const allowDestructiveSync = parseBoolean(req.body?.allowDestructiveSync, false)
+    const result = await persistGithubDashboard(dashboard, expectedRevision, eventType, {
+      allowDestructiveSync,
+    })
+    res.json({ ok: true, ...result })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/github/dashboard/history', requireAdminAuth, async (req, res, next) => {
+  try {
+    const limit = parsePositiveInt(req.query?.limit, 30, { min: 1, max: 200 })
+    const history = await loadGithubDashboardHistory(limit)
+    res.json({ ok: true, history })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/github/dashboard/rollback', requireAdminAuth, async (req, res, next) => {
+  try {
+    const revision = parsePositiveInt(req.body?.revision, null, { min: 1 })
+    const result = await rollbackGithubDashboard(revision)
     res.json({ ok: true, ...result })
   } catch (error) {
     next(error)
@@ -2047,7 +2289,11 @@ app.put('/api/providers/:provider/snapshot', requireAdminAuth, async (req, res, 
     if (provider === 'github' && req.body?.dashboard) {
       const dashboard = normalizeDashboardPayload(req.body.dashboard)
       const expectedRevision = parseExpectedRevision(req.body?.expectedRevision)
-      const result = await persistGithubDashboard(dashboard, expectedRevision)
+      const eventType = parseGithubHistoryEventType(req.body?.eventType, 'import')
+      const allowDestructiveSync = parseBoolean(req.body?.allowDestructiveSync, true)
+      const result = await persistGithubDashboard(dashboard, expectedRevision, eventType, {
+        allowDestructiveSync,
+      })
       res.json({ ok: true, provider, ...result })
       return
     }
@@ -2478,9 +2724,59 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
   }
 })
 
+app.post('/api/rum/web-vitals', async (req, res, next) => {
+  try {
+    if (!webVitalsEnabled) {
+      res.status(204).end()
+      return
+    }
+
+    const metric = req.body && typeof req.body === 'object' ? req.body : null
+    if (!metric) {
+      const error = new Error('invalid metric payload')
+      error.status = 400
+      throw error
+    }
+
+    const name = typeof metric.name === 'string' ? metric.name.trim() : ''
+    const value = typeof metric.value === 'number' && Number.isFinite(metric.value) ? metric.value : null
+    const rating =
+      metric.rating === 'good' || metric.rating === 'needs-improvement' || metric.rating === 'poor'
+        ? metric.rating
+        : null
+
+    if (!name || value === null || rating === null) {
+      const error = new Error('invalid metric payload')
+      error.status = 400
+      throw error
+    }
+
+    const sample = {
+      name,
+      value,
+      rating,
+      id: typeof metric.id === 'string' ? metric.id : '',
+      navigationType: typeof metric.navigationType === 'string' ? metric.navigationType : '',
+      provider: typeof metric.provider === 'string' ? metric.provider : null,
+      type: typeof metric.type === 'string' ? metric.type : null,
+      page: typeof metric.page === 'string' ? metric.page : null,
+      createdAt: new Date().toISOString(),
+    }
+
+    webVitalsSamples.push(sample)
+    if (webVitalsSamples.length > WEB_VITALS_MAX_SAMPLES) {
+      webVitalsSamples.splice(0, webVitalsSamples.length - WEB_VITALS_MAX_SAMPLES)
+    }
+
+    res.status(204).end()
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/admin/export', requireAdminAuth, async (_req, res, next) => {
   try {
-    const [items, notes, meta] = await Promise.all([
+    const [items, notes, meta, githubHistory] = await Promise.all([
       query(
         `
           SELECT
@@ -2519,6 +2815,13 @@ app.get('/api/admin/export', requireAdminAuth, async (_req, res, next) => {
           ORDER BY key ASC
         `,
       ),
+      query(
+        `
+          SELECT id, revision, event_type AS "eventType", dashboard, created_at AS "createdAt"
+          FROM github_dashboard_history
+          ORDER BY id ASC
+        `,
+      ),
     ])
 
     res.json({
@@ -2528,6 +2831,7 @@ app.get('/api/admin/export', requireAdminAuth, async (_req, res, next) => {
         items: items.rows,
         notes: notes.rows,
         meta: Object.fromEntries(meta.rows.map((row) => [row.key, row.value])),
+        githubDashboardHistory: githubHistory.rows,
       },
     })
   } catch (error) {
@@ -2548,6 +2852,9 @@ app.post('/api/admin/import', requireAdminAuth, async (req, res, next) => {
     const items = Array.isArray(payload.data.items) ? payload.data.items : []
     const notes = Array.isArray(payload.data.notes) ? payload.data.notes : []
     const meta = payload.data.meta && typeof payload.data.meta === 'object' ? payload.data.meta : {}
+    const githubDashboardHistory = Array.isArray(payload.data.githubDashboardHistory)
+      ? payload.data.githubDashboardHistory
+      : []
 
     const client = await getClient()
 
@@ -2556,6 +2863,7 @@ app.post('/api/admin/import', requireAdminAuth, async (req, res, next) => {
       await client.query('DELETE FROM unified_notes')
       await client.query('DELETE FROM unified_items')
       await client.query('DELETE FROM unified_meta')
+      await client.query('DELETE FROM github_dashboard_history')
 
       const insertItemSql = `
         INSERT INTO unified_items (
@@ -2618,6 +2926,27 @@ app.post('/api/admin/import', requireAdminAuth, async (req, res, next) => {
         )
       }
 
+      for (const row of githubDashboardHistory) {
+        const revision = Number(row?.revision)
+        if (!Number.isInteger(revision) || revision < 1) {
+          continue
+        }
+
+        const eventType = parseGithubHistoryEventType(row?.eventType, 'import')
+        const dashboard = row?.dashboard && typeof row.dashboard === 'object' ? row.dashboard : null
+        if (!dashboard) {
+          continue
+        }
+
+        await client.query(
+          `
+            INSERT INTO github_dashboard_history (revision, event_type, dashboard, created_at)
+            VALUES ($1, $2, $3::jsonb, $4::timestamptz)
+          `,
+          [revision, eventType, JSON.stringify(dashboard), toIso(row?.createdAt || new Date().toISOString())],
+        )
+      }
+
       await client.query('COMMIT')
 
       res.json({ ok: true, items: items.length, notes: notes.length, meta: Object.keys(meta).length })
@@ -2640,6 +2969,14 @@ app.use((error, _req, res, _next) => {
 })
 
 const start = async () => {
+  const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production'
+  if (isProduction && !adminApiToken) {
+    throw new Error('ADMIN_API_TOKEN is required when NODE_ENV=production')
+  }
+  if (!isProduction && !adminApiToken) {
+    console.warn('[server] ADMIN_API_TOKEN is empty (dev mode only). Protected routes allow unauthenticated access.')
+  }
+
   await migrate()
 
   const port = Number(process.env.PORT || 4000)

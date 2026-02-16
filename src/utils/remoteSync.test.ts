@@ -23,6 +23,11 @@ describe('isRemoteSyncConnectionWarning', () => {
     expect(isRemoteSyncConnectionWarning('유튜브 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.')).toBe(
       true,
     )
+    expect(
+      isRemoteSyncConnectionWarning(
+        '원격 DB 연결 문제로 현재 GitHub 보드는 읽기 전용입니다. 연결 복구 후 다시 시도해 주세요.',
+      ),
+    ).toBe(true)
   })
 
   it('ignores unrelated messages', () => {

@@ -16,13 +16,13 @@ import {
   CARDS_PER_PAGE,
   CATEGORY_NAME_MAX_LENGTH,
   DEFAULT_MAIN_CATEGORY_ID,
-  REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK,
   REMOTE_SYNC_RECOVERED_BADGE_MS,
   REMOTE_SYNC_RECOVERY_INTERVAL_MS,
   REMOTE_SYNC_SAVE_DEBOUNCE_MS,
 } from '@constants'
 import { removeRepoDetailCache } from '@storage/detailCache'
 import {
+  clearGithubDashboardCache,
   saveCards,
   saveCategories,
   saveNotes,
@@ -38,7 +38,7 @@ import type {
 } from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { parseGitHubRepoUrl } from '@utils/parseGitHubRepoUrl'
-import { isRemoteSyncConnectionWarning, isTransientRemoteSyncError } from '@utils/remoteSync'
+import { isRemoteSyncConnectionWarning } from '@utils/remoteSync'
 
 type GithubFeatureEntryProps = {
   themeMode: ThemeMode
@@ -87,7 +87,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   >
 
   const remoteEnabled = isRemoteSnapshotEnabled()
-  const [state, dispatch] = useReducer(dashboardReducer, undefined, initialState)
+  const [state, dispatch] = useReducer(
+    dashboardReducer,
+    { useLocalCache: !remoteEnabled },
+    initialState,
+  )
   const [loading, setLoading] = useState(false)
   const [hydrating, setHydrating] = useState(remoteEnabled)
   const [hasLoadedRemote, setHasLoadedRemote] = useState(!remoteEnabled)
@@ -101,6 +105,8 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const remoteRevisionRef = useRef<number | null>(null)
+  const lastCommittedSnapshotRef = useRef<GithubSavePayload | null>(null)
+  const skipNextRemoteSaveRef = useRef(false)
   const saveDebounceTimeoutRef = useRef<number | null>(null)
   const saveInFlightRef = useRef(false)
   const pendingRemotePayloadRef = useRef<GithubSavePayload | null>(null)
@@ -137,11 +143,19 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     })
   }, [cardsInSelectedCategory, isSearchMode, normalizedSearchQuery, state.cards])
 
-  const totalPages = useMemo(() => pageCount(visibleCards.length, CARDS_PER_PAGE), [visibleCards.length])
+  const effectiveVisibleCards = useMemo(
+    () => (remoteEnabled && !hasRemoteBaseline ? [] : visibleCards),
+    [hasRemoteBaseline, remoteEnabled, visibleCards],
+  )
+
+  const totalPages = useMemo(
+    () => pageCount(effectiveVisibleCards.length, CARDS_PER_PAGE),
+    [effectiveVisibleCards.length],
+  )
 
   const currentCards = useMemo(
-    () => paginate(visibleCards, state.currentPage, CARDS_PER_PAGE),
-    [state.currentPage, visibleCards],
+    () => paginate(effectiveVisibleCards, state.currentPage, CARDS_PER_PAGE),
+    [effectiveVisibleCards, state.currentPage],
   )
 
   const selectedRepo = useMemo(
@@ -153,12 +167,19 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     return new Map(state.categories.map((category) => [category.id, category.name]))
   }, [state.categories])
 
+  const readOnlyMode = remoteEnabled && (!hasRemoteBaseline || remoteSyncDegraded || hydrating)
+  const readOnlyMessage = '원격 DB 연결 문제로 현재 GitHub 보드는 읽기 전용입니다. 연결 복구 후 다시 시도해 주세요.'
+
   const persistLocalSnapshot = useCallback((payload: GithubSavePayload) => {
+    if (remoteEnabled) {
+      return
+    }
+
     saveCards(payload.cards)
     saveNotes(payload.notesByRepo)
     saveCategories(payload.categories)
     saveSelectedCategoryId(payload.selectedCategoryId)
-  }, [])
+  }, [remoteEnabled])
 
   const flushRemoteSaveQueue = useCallback(async () => {
     if (saveInFlightRef.current || !pendingRemotePayloadRef.current) {
@@ -177,6 +198,8 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
           if (typeof nextRevision === 'number') {
             remoteRevisionRef.current = nextRevision
           }
+          lastCommittedSnapshotRef.current = payload
+          clearGithubDashboardCache()
 
           if (transientRemoteSaveFailuresRef.current > 0) {
             transientRemoteSaveFailuresRef.current = 0
@@ -193,46 +216,27 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
             setLastSyncSuccessAt(new Date().toISOString())
           }
         } catch (error) {
-          persistLocalSnapshot(payload)
-
-          const statusValue =
-            error && typeof error === 'object' ? (error as { status?: unknown }).status : undefined
-          const statusCode = typeof statusValue === 'number' ? Number(statusValue) : null
-
-          if (statusCode === 409) {
-            transientRemoteSaveFailuresRef.current = 0
-            remoteRevisionRef.current = null
-            pendingRemotePayloadRef.current = null
-            setHasRemoteBaseline(false)
-            setRemoteSyncDegraded(true)
-            setSyncStatus('retrying')
-            setErrorMessage('원격 대시보드 버전 충돌이 발생해 다시 동기화 중입니다.')
-            break
-          }
-
-          const transientError = isTransientRemoteSyncError(error)
-
-          if (transientError) {
-            transientRemoteSaveFailuresRef.current += 1
-            if (transientRemoteSaveFailuresRef.current < REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK) {
-              setSyncStatus('retrying')
-              setErrorMessage(
-                `원격 저장 연결이 불안정합니다. 자동 재시도 중입니다. (${transientRemoteSaveFailuresRef.current}/${REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK})`,
-              )
-              continue
-            }
-          }
-
           transientRemoteSaveFailuresRef.current = 0
           pendingRemotePayloadRef.current = null
+          const fallbackSnapshot = lastCommittedSnapshotRef.current
+          if (fallbackSnapshot) {
+            dispatch({
+              type: 'hydrateDashboard',
+              payload: {
+                cards: fallbackSnapshot.cards,
+                notesByRepo: fallbackSnapshot.notesByRepo,
+                categories: fallbackSnapshot.categories,
+                selectedCategoryId: fallbackSnapshot.selectedCategoryId,
+              },
+            })
+          }
+
           setRemoteSyncDegraded(true)
-          setSyncStatus('local')
+          setSyncStatus('retrying')
           setErrorMessage(
-            transientError
-              ? '원격 저장 연결이 계속 실패해 로컬 저장으로 전환했습니다. 서버 실행/네트워크/CORS 설정을 확인해 주세요.'
-              : error instanceof Error
-                ? `${error.message} 로컬 저장으로 전환했습니다.`
-                : '원격 대시보드 저장에 실패했습니다. 로컬 저장으로 전환했습니다.',
+            error instanceof Error
+              ? `${readOnlyMessage} (${error.message})`
+              : `${readOnlyMessage} (원격 저장 실패)`,
           )
           break
         }
@@ -243,7 +247,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
         void flushRemoteSaveQueue()
       }
     }
-  }, [persistLocalSnapshot, remoteSyncDegraded])
+  }, [readOnlyMessage, remoteSyncDegraded])
 
   const enqueueRemoteSave = useCallback((payload: GithubSavePayload) => {
     pendingRemotePayloadRef.current = payload
@@ -293,6 +297,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
         if (!cancelled) {
           setHasRemoteBaseline(true)
           setRemoteSyncDegraded(false)
+          clearGithubDashboardCache()
         }
 
         if (!cancelled && remoteDashboard) {
@@ -300,6 +305,13 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
             typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
               ? remoteDashboard.revision
               : null
+          lastCommittedSnapshotRef.current = {
+            cards: remoteDashboard.cards,
+            notesByRepo: remoteDashboard.notesByRepo,
+            categories: remoteDashboard.categories,
+            selectedCategoryId: remoteDashboard.selectedCategoryId,
+          }
+          skipNextRemoteSaveRef.current = true
           dispatch({
             type: 'hydrateDashboard',
             payload: {
@@ -314,9 +326,13 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
       } catch (error) {
         if (!cancelled) {
           remoteRevisionRef.current = null
-          setErrorMessage(error instanceof Error ? error.message : '원격 대시보드 로딩에 실패했습니다.')
+          setErrorMessage(
+            error instanceof Error
+              ? `${readOnlyMessage} (${error.message})`
+              : `${readOnlyMessage} (원격 대시보드 로딩 실패)`,
+          )
           setRemoteSyncDegraded(true)
-          setSyncStatus('local')
+          setSyncStatus('retrying')
         }
       } finally {
         if (!cancelled) {
@@ -334,8 +350,8 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }, [remoteEnabled])
 
   useEffect(() => {
-    if (remoteEnabled && !remoteSyncDegraded && hasRemoteBaseline) {
-      if (!hasLoadedRemote) {
+    if (remoteEnabled) {
+      if (!hasLoadedRemote || remoteSyncDegraded || !hasRemoteBaseline) {
         return
       }
 
@@ -346,6 +362,13 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
         selectedCategoryId: state.selectedCategoryId,
       }
 
+      if (skipNextRemoteSaveRef.current) {
+        skipNextRemoteSaveRef.current = false
+        persistLocalSnapshot(payload)
+        return
+      }
+
+      persistLocalSnapshot(payload)
       enqueueRemoteSave(payload)
       return
     }
@@ -404,6 +427,13 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
               typeof remoteDashboard.revision === 'number' && Number.isFinite(remoteDashboard.revision)
                 ? remoteDashboard.revision
                 : null
+            lastCommittedSnapshotRef.current = {
+              cards: remoteDashboard.cards,
+              notesByRepo: remoteDashboard.notesByRepo,
+              categories: remoteDashboard.categories,
+              selectedCategoryId: remoteDashboard.selectedCategoryId,
+            }
+            skipNextRemoteSaveRef.current = true
             dispatch({
               type: 'hydrateDashboard',
               payload: {
@@ -442,9 +472,10 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
           setSyncStatus('recovered')
           setLastSyncSuccessAt(new Date().toISOString())
           setErrorMessage((previous) => (isRemoteSyncConnectionWarning(previous) ? null : previous))
+          clearGithubDashboardCache()
         }
       } catch {
-        // keep local fallback until remote read/write succeeds
+        // keep read-only mode until remote read/write succeeds
       } finally {
         inFlight = false
       }
@@ -475,13 +506,18 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }, [lastSyncSuccessAt, onSyncStatusChange, syncStatus])
 
   useEffect(() => {
-    const maxPage = pageCount(visibleCards.length, CARDS_PER_PAGE)
+    const maxPage = pageCount(effectiveVisibleCards.length, CARDS_PER_PAGE)
     if (state.currentPage > maxPage) {
       dispatch({ type: 'setPage', payload: { page: maxPage } })
     }
-  }, [state.currentPage, visibleCards.length])
+  }, [effectiveVisibleCards.length, state.currentPage])
 
   const handleSubmitRepo = async (value: string): Promise<boolean> => {
+    if (readOnlyMode) {
+      setErrorMessage(readOnlyMessage)
+      return false
+    }
+
     if (hydrating) {
       setErrorMessage('원격 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.')
       return false
@@ -537,6 +573,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleDeleteCard = (repoId: string) => {
+    if (readOnlyMode) {
+      setErrorMessage(readOnlyMessage)
+      return
+    }
+
     const target = state.cards.find((card) => card.id === repoId)
     if (!target) {
       return
@@ -551,6 +592,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleAddNote = (repoId: string, content: string) => {
+    if (readOnlyMode) {
+      setErrorMessage(readOnlyMessage)
+      return
+    }
+
     const note: RepoNote = {
       id: createNoteId(),
       repoId,
@@ -562,6 +608,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleCreateCategory = (input: string): boolean => {
+    if (readOnlyMode) {
+      setCategoryMessage(readOnlyMessage)
+      return false
+    }
+
     const name = normalizeCategoryName(input)
 
     if (!name) {
@@ -596,6 +647,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleRenameCategory = (category: Category, input: string): boolean => {
+    if (readOnlyMode) {
+      setCategoryMessage(readOnlyMessage)
+      return false
+    }
+
     const name = normalizeCategoryName(input)
 
     if (!name) {
@@ -619,6 +675,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleDeleteCategory = (category: Category) => {
+    if (readOnlyMode) {
+      setCategoryMessage(readOnlyMessage)
+      return
+    }
+
     if (category.isSystem) {
       setCategoryMessage('기본 카테고리는 삭제할 수 없습니다.')
       return
@@ -629,6 +690,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   }
 
   const handleMoveCard = (repoId: string, targetCategoryId: CategoryId) => {
+    if (readOnlyMode) {
+      setErrorMessage(readOnlyMessage)
+      return
+    }
+
     dispatch({
       type: 'moveCardToCategory',
       payload: {
@@ -682,9 +748,19 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
         {categoryMessage && !isCategoryModalOpen ? <p className="category-message">{categoryMessage}</p> : null}
       </section>
 
+      {readOnlyMode ? (
+        <section className="main-only-notice" aria-live="polite">
+          <p>{readOnlyMessage}</p>
+        </section>
+      ) : null}
+
       {state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID ? (
         <section className="repo-input-split">
-          <RepoInputForm onSubmit={handleSubmitRepo} loading={loading || hydrating} errorMessage={errorMessage} />
+          <RepoInputForm
+            onSubmit={handleSubmitRepo}
+            loading={loading || hydrating || readOnlyMode}
+            errorMessage={errorMessage}
+          />
           <RepoSearchForm
             value={localSearchQuery}
             onChange={(value) => {
@@ -713,15 +789,19 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
           </div>
         ) : null}
 
-        {!hydrating && visibleCards.length === 0 ? (
+        {!hydrating && effectiveVisibleCards.length === 0 ? (
           <div className="empty-state">
             <h2>
-              {isSearchMode
+              {remoteEnabled && !hasRemoteBaseline
+                ? '원격 DB 연결 대기 중'
+                : isSearchMode
                 ? '검색 결과가 없습니다'
                 : `${selectedCategory?.name ?? '현재'} 카테고리에 저장소가 없습니다`}
             </h2>
             <p>
-              {isSearchMode
+              {remoteEnabled && !hasRemoteBaseline
+                ? '현재는 DB 읽기 전용 모드입니다. 원격 연결 복구 후 자동으로 최신 데이터가 표시됩니다.'
+                : isSearchMode
                 ? '다른 키워드로 다시 검색해 보세요.'
                 : state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID
                   ? '상단 입력창에 GitHub 저장소 URL을 넣고 첫 카드를 만들어 보세요.'
@@ -730,7 +810,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
           </div>
         ) : null}
 
-        {!hydrating && visibleCards.length > 0 ? (
+        {!hydrating && effectiveVisibleCards.length > 0 ? (
           <>
             <div className="card-grid">
               {currentCards.map((repo) => (
@@ -739,6 +819,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
                   repo={repo}
                   categoryName={isSearchMode ? (categoryNameById.get(repo.categoryId) ?? repo.categoryId) : null}
                   categories={state.categories}
+                  readOnly={readOnlyMode}
                   onOpenDetail={handleOpenDetail}
                   onDelete={handleDeleteCard}
                   onMove={handleMoveCard}
@@ -757,6 +838,8 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
       <RepoDetailModal
         repo={selectedRepo}
         notes={selectedRepo ? state.notesByRepo[selectedRepo.id] ?? [] : []}
+        readOnly={readOnlyMode}
+        readOnlyMessage={readOnlyMessage}
         onClose={() => dispatch({ type: 'closeModal' })}
         onAddNote={handleAddNote}
       />

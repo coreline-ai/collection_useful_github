@@ -11,6 +11,8 @@ import { renderMarkdownToSafeHtml } from '@utils/markdown'
 type RepoDetailModalProps = {
   repo: GitHubRepoCard | null
   notes: RepoNote[]
+  readOnly?: boolean
+  readOnlyMessage?: string
   onClose: () => void
   onAddNote: (repoId: string, content: string) => void
 }
@@ -56,7 +58,14 @@ const HeaderBadge = ({ icon, label, value }: { icon: HeaderBadgeIcon; label: str
   )
 }
 
-export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailModalProps) => {
+export const RepoDetailModal = ({
+  repo,
+  notes,
+  readOnly = false,
+  readOnlyMessage = '읽기 전용 모드에서는 기록을 수정할 수 없습니다.',
+  onClose,
+  onAddNote,
+}: RepoDetailModalProps) => {
   const [noteInput, setNoteInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
@@ -354,6 +363,11 @@ export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailM
 
   const handleSubmitNote = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (readOnly) {
+      setError(readOnlyMessage)
+      return
+    }
+
     const content = noteInput.trim()
 
     if (!content) {
@@ -569,9 +583,13 @@ export const RepoDetailModal = ({ repo, notes, onClose, onAddNote }: RepoDetailM
               onChange={(event) => setNoteInput(event.target.value)}
               placeholder="간단한 아이디어나 작업 기록을 남겨 보세요."
               maxLength={MAX_NOTE_LENGTH}
+              disabled={readOnly}
             />
-            <button type="submit">입력</button>
+            <button type="submit" disabled={readOnly}>
+              입력
+            </button>
           </form>
+          {readOnly ? <p className="inline-error">{readOnlyMessage}</p> : null}
           <p className="note-counter">
             {noteInput.length}/{MAX_NOTE_LENGTH}
           </p>
