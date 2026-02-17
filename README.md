@@ -1,4 +1,4 @@
-# Useful Git YouTube Bookmark Info
+# 개인 작업 정보 (Useful Git YouTube Bookmark Info)
 
 <p align="left">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
@@ -6,147 +6,73 @@
   <img alt="Vite 7" src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" />
   <img alt="Node 20+" src="https://img.shields.io/badge/Node-20+-339933?logo=node.js&logoColor=white" />
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white" />
-  <img alt="Vitest" src="https://img.shields.io/badge/Tested with Vitest-6E9F18?logo=vitest&logoColor=white" />
+  <img alt="Vitest" src="https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=white" />
 </p>
 
-GitHub, YouTube, Bookmark를 카드보드로 관리하고, PostgreSQL 기반 통합검색을 제공하는 웹앱입니다.
+업데이트 기준: 2026-02-17
 
-<p align="left">
-<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_52_51" src="https://github.com/user-attachments/assets/7c804836-7e9d-4dbf-a8ef-32bcc624f7d1" />
-<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_50_36" src="https://github.com/user-attachments/assets/2163cd47-abc8-46ab-a2ff-5966a1339369" /><br>
-<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_49_59" src="https://github.com/user-attachments/assets/09e3f8a7-5348-4706-8873-dfb776151513" />
-<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_49_50" src="https://github.com/user-attachments/assets/70ece7eb-4957-46a7-aaa5-6c4ff5b3440c" />
-</p>
+GitHub 저장소, YouTube 영상, 웹 북마크를 카드형으로 저장/분류/검색하는 개인용 대시보드입니다.
 
-## 1. 핵심 요약
+## 1. 현재 구현 요약
 
 - 최상단 메뉴: `통합검색 > 깃허브 > 유튜브 > 북마크`
-- 각 메뉴는 `src/features/*` 단위로 분리된 독립 모듈 구조
-- 저장소는 PostgreSQL `unified_items / unified_notes / unified_meta`를 기준으로 동작
-- 원격 저장 실패 시 복구형 동기화 전략(`healthy/retrying/local/recovered`) 적용
-- 통합검색은 PostgreSQL 하이브리드 랭킹(FTS + Prefix + Trigram + 최신성 보정)
+- Feature 분리: `src/features/github`, `src/features/youtube`, `src/features/bookmark`, `src/features/unified-search`
+- 저장소: PostgreSQL `unified_items / unified_notes / unified_meta` 기반
+- 동기화 상태: `healthy / retrying / local / recovered` + 마지막 성공 시각
+- 검색: PostgreSQL 하이브리드 랭킹(FTS + prefix + trigram + recency)
+- 요약: GitHub/YouTube/Bookmark 모두 GLM 기반 비동기 큐 + 수동 재생성 버튼
 
-## 1.1 최근 추가 기능 상세
+## 2. 보드별 기능
 
-- GitHub 요약 재생성(수동):
-  - 카드 하단 `요약 재생성` 버튼 추가
-  - 서버 비동기 큐(`github_summary_jobs`) 기반 처리
-  - 성공 시 카드 `summary` 즉시 교체, 실패 시 기존 summary 유지
-- YouTube 요약 고도화:
-  - 요약 상태(`idle/queued/ready/failed`) 배지 + 재생성 동작
-  - 요약 결과 툴팁/상태 반영 강화
-  - NotebookLM source 연동 포인트(`NOTEBOOKLM_ENABLED`) 유지
-- Bookmark 요약 재생성:
-  - 카드 하단에서 수동 재생성
-  - 서버 비동기 큐(`bookmark_summary_jobs`) + 캐시(`bookmark_summary_cache`)
-  - 완료 시 카드 본문을 `summaryText`로 대체, 실패 시 excerpt 보존
-- 동기화/운영 안정화:
-  - 상단 동기화 상태 배지 + 마지막 성공 시각 표시
-  - `dev:all` 실행 시 4000 포트 기존 서버 자동 정리
-  - 요약 404 오류 메시지 정밀화(라우트 미존재 vs 카드 미등록 구분)
-- 운영 API 확장:
-  - GitHub 대시보드 이력 조회/롤백 API 추가
-  - 백업 내보내기/복원 경로 유지 및 테스트 커버리지 강화
+### 2.1 GitHub
 
-## 2. 주요 기능
+- 입력: `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`
+- 카드: 이름, 요약, 언어, stars, forks, 링크
+- 상세 모달: `Overview / README / Activity` + 메모
+- 요약 재생성: 카드 하단 버튼 수동 실행
+- 카테고리: 메인/창고 + 사용자 카테고리
 
-### 2.1 통합검색
-
-- provider/type 필터 검색 (`github`, `youtube`, `bookmark`)
-- 검색 방식 요약 패널 내장
-- 최근검색(localStorage) + 결과 캐시(TTL/LRU)
-- 백업 내보내기/복원 UI 제공
-
-### 2.2 GitHub 보드
-
-- 입력: `https://github.com/owner/repo` 또는 `owner/repo`
-- 카드: repo/owner/요약/언어/stars/forks/링크
-- 카테고리: 메인/창고 + 사용자 카테고리, 카드 이동/삭제
-- 페이지네이션: 데스크톱 4열, 페이지당 12개
-- 상세 모달: `Overview / README / Activity` + 메모 저장
-- 요약 재생성: 카드 하단 `요약 재생성` 버튼 (GLM, 수동 트리거)
-
-### 2.3 YouTube 보드
+### 2.2 YouTube
 
 - 입력: `watch`, `youtu.be`, `shorts` 영상 URL
-- 카드: 썸네일/제목/채널/조회수/게시일/링크/요약 상태
-- 요약: 비동기 큐 기반 GLM 요약 + 재생성 버튼
-- NotebookLM 연동 포인트 포함 (`NOTEBOOKLM_ENABLED` 기반)
-- 상세 모달 없음 (카드 중심 UX)
+- 카드: 썸네일, 제목, 채널, 조회수, 게시일, 링크, 요약 상태
+- 요약 재생성: 카드 하단 버튼 수동 실행
+- NotebookLM 연동 포인트: `NOTEBOOKLM_ENABLED` (기본 비활성)
+- 상세 모달 없음
 
-### 2.4 Bookmark 보드
+### 2.3 Bookmark
 
 - 입력: `http/https` URL
 - 서버 메타 추출: title/excerpt/domain/thumbnail/favicon/canonical
-- 카드: 제목/요약(또는 excerpt)/링크/추가일/도메인
-- 요약 재생성: 비동기 큐 기반 GLM 수동 트리거
-- 링크 점검 API, 중복 정리 도우미 포함
-- 상세 모달 없음 (카드 중심 UX)
+- 카드: 제목, 본문(요약 또는 excerpt), 링크, 추가일, 도메인
+- 요약 재생성: 카드 하단 버튼 수동 실행
+- 링크 상태 점검 API 제공 (`/api/bookmark/link-check`)
+- 상세 모달 없음
 
-## 3. 아키텍처
+### 2.4 통합검색
 
-## 3.1 프론트 구조
+- provider/type 필터
+- 최근검색(localStorage)
+- 결과 캐시(TTL/LRU)
+- 백업 내보내기/복원
 
-```text
-src/
-  app/
-    AppShell.tsx
-  core/
-    data/
-      adapters/remoteDb.ts
-      migration.ts
-      repository.ts
-      schema.ts
-      indexer.ts
-    navigation/topSection.ts
-  features/
-    unified-search/
-    github/
-    youtube/
-    bookmark/
-  shared/
-    components/
-    storage/localStorage.ts
-```
+## 3. 빠른 시작
 
-## 3.2 서버 구조
-
-```text
-server/
-  src/
-    index.js
-    services/
-      githubSummary*.js
-      youtubeSummary*.js
-      bookmarkSummary*.js
-      notebooklm*.js
-  db/schema.sql
-```
-
-## 3.3 동기화 원칙
-
-- DB 단일 원본 기반으로 스냅샷 저장
-- 네트워크 장애 시 즉시 local-only로 고정하지 않고 재시도 후 전환
-- 복구 성공 시 자동 `recovered -> healthy`
-- 상단 상태 배지로 현재 연결 상태/마지막 동기화 시간 노출
-
-## 4. 빠른 시작
-
-## 4.1 설치
+### 3.1 설치
 
 ```bash
 npm install
 npm --prefix server install
 ```
 
-## 4.2 환경 파일 준비
+### 3.2 환경 파일
 
 ```bash
 cp .env.example .env.local
 cp server/.env.example server/.env
 ```
 
-## 4.3 PostgreSQL 실행
+### 3.3 PostgreSQL 실행
 
 ```bash
 cd server
@@ -154,197 +80,109 @@ docker compose up -d
 cd ..
 ```
 
-## 4.4 마이그레이션
+### 3.4 마이그레이션 + 실행
 
 ```bash
 npm run server:migrate
-```
-
-## 4.5 실행
-
-```bash
 npm run dev:all
 ```
 
-- Frontend: `http://localhost:5173`
+- Web: `http://localhost:5173`
 - API: `http://localhost:4000`
 
-`dev:all`은 4000 포트의 기존 서버 프로세스를 먼저 정리한 뒤 최신 서버를 띄웁니다.
+## 4. 주요 npm 스크립트
 
-## 4.6 Mac mini 상시운영 (잠자기 허용)
+- 개발/기동
+  - `npm run dev:all`
+  - `npm run dev:status`
+  - `npm run server:migrate`
+- 품질/테스트
+  - `npm run lint`
+  - `npm run test`
+  - `npm run build`
+  - `npm run test:e2e:postgres`
+- 보안/운영
+  - `npm run scan:secrets`
+  - `npm run scan:secrets:history`
+  - `npm run audit:deps`
+  - `npm run db:backup`
+  - `npm run db:restore -- --input <backup.sql.gz>`
+  - `npm run db:verify`
+  - `npm run db:drill`
+  - `npm run perf:check-web-vitals`
+  - `npm run qa:browser-mobile`
 
-잠자기 복귀 후 자동 복구가 필요하면 `launchd` 기반 설치를 사용합니다.
+## 5. 운영 점검 루틴(권장)
 
-```bash
-npm run macos:install
-npm run macos:status
-```
-
-제거:
-
-```bash
-npm run macos:uninstall
-```
-
-업무 중 대체 복귀 검증:
-
-```bash
-npm run macos:self-test-resume
-npm run macos:check-resume
-```
-
-상세: `docs/MAC_MINI_SLEEP_RESUME_DEPLOYMENT.md`
-
-## 5. 환경 변수
-
-## 5.1 Client (`.env.local`)
-
-| 변수 | 기본값 | 설명 |
+| 항목 | 명령어 | 주기 |
 |---|---|---|
-| `VITE_POSTGRES_SYNC_API_BASE_URL` | `http://localhost:4000` | 서버 API base URL |
-| `VITE_POSTGRES_SYNC_API_TOKEN` | - | 쓰기 보호 API 토큰(선택) |
-| `VITE_POSTGRES_SYNC_TIMEOUT_SECONDS` | `12` | 원격 요청 타임아웃 |
-| `VITE_GITHUB_TOKEN` | - | GitHub API 제한 완화(선택) |
-| `VITE_GITHUB_TIMEOUT_SECONDS` | `12` | GitHub 호출 타임아웃 |
-| `GLM_API_KEY` | - | 클라이언트 번역용 GLM 키(선택) |
-| `GLM_BASE_URL` | `https://api.z.ai/api/coding/paas/v4` | GLM API URL |
-| `GLM_MODEL` | `glm-4.7` | GLM 모델 |
-| `GLM_TIMEOUT_SECONDS` | `30` | GLM 호출 타임아웃 |
-| `VITE_WEB_VITALS_ENABLED` | `false` | Web Vitals 전송 활성화 |
-| `VITE_WEB_VITALS_ENDPOINT` | `http://localhost:4000/api/rum/web-vitals` | RUM 수집 엔드포인트 |
-
-## 5.2 Server (`server/.env`)
-
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `PORT` | `4000` | API 포트 |
-| `DATABASE_URL` | - | 우선 접속 문자열 |
-| `PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE` | `localhost/55432/postgres/postgres/useful_git_info` | DB 개별 접속값 |
-| `PGSSL` | `false` | SSL 사용 여부 |
-| `CORS_ORIGIN` | `http://localhost:5173,http://localhost:5174` | 허용 Origin |
-| `ADMIN_API_TOKEN` | - | 대시보드 쓰기 보호 토큰 |
-| `YOUTUBE_API_KEY` | - | YouTube Data API 키 |
-| `YOUTUBE_SUMMARY_ENABLED` | `true` | YouTube 요약 활성화 |
-| `YOUTUBE_SUMMARY_PROVIDER` | `glm` | 요약 제공자 |
-| `NOTEBOOKLM_ENABLED` | `false` | NotebookLM source 연동 활성화 |
-| `GLM_API_KEY` | - | 서버 요약(GLM) API 키 |
-| `GITHUB_SUMMARY_ENABLED` | `true` | GitHub 요약 재생성 활성화 |
-| `GITHUB_SUMMARY_README_MAX_BYTES` | `8192` | GitHub README 입력 최대 바이트 |
-| `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 추출 타임아웃 |
-| `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 메타 추출 최대 응답 바이트 |
-| `WEB_VITALS_ENABLED` | `false` | 서버 RUM 수집 활성화 |
-| `WEB_VITALS_MAX_SAMPLES` | `500` | 서버 메모리 내 RUM 샘플 유지 개수 |
-| `WEB_VITALS_SUMMARY_DEFAULT_MINUTES` | `60` | RUM 요약 조회 기본 기간(분) |
-
-세부 변수는 `server/.env.example`를 기준으로 사용하세요.
+| Tracked 파일 시크릿 점검 | `npm run scan:secrets` | 매 PR |
+| Git 히스토리 시크릿 점검 | `npm run scan:secrets:history` | 주 1회 |
+| DB 백업/복구 리허설 | `npm run db:drill` | 주 1회 |
+| Web Vitals 임계치 점검 | `npm run perf:check-web-vitals` | 주 1회 + 배포 직후 |
+| 브라우저/모바일 QA | `npm run qa:browser-mobile` | 주 1회 |
 
 ## 6. API 개요
 
-### 6.1 공통
+### 6.1 상태/검색/운영
 
 - `GET /api/health`
 - `GET /api/health/deep`
 - `GET /api/search`
-- `GET /api/admin/export`
-- `POST /api/admin/import`
+- `POST /api/rum/web-vitals`
 - `GET /api/admin/rum/web-vitals/summary`
 - `DELETE /api/admin/rum/web-vitals/samples`
+- `GET /api/admin/export`
+- `POST /api/admin/import`
 
 ### 6.2 대시보드
 
 - `GET /api/github/dashboard`
 - `PUT /api/github/dashboard`
+- `GET /api/github/dashboard/history`
+- `POST /api/github/dashboard/rollback`
 - `GET /api/youtube/dashboard`
 - `PUT /api/youtube/dashboard`
 - `GET /api/bookmark/dashboard`
 - `PUT /api/bookmark/dashboard`
 
-### 6.3 요약 재생성
+### 6.3 요약/메타
 
-- GitHub:
+- GitHub
   - `POST /api/github/summaries/regenerate`
   - `GET /api/github/summaries/status?repoId=owner/repo`
-- YouTube:
+- YouTube
+  - `GET /api/youtube/videos/:videoId`
   - `POST /api/youtube/videos/:videoId/summarize`
   - `GET /api/youtube/summaries/:videoId/status`
   - `POST /api/youtube/summaries/:jobId/retry`
-- Bookmark:
+- Bookmark
+  - `GET /api/bookmark/metadata?url=...`
+  - `GET /api/bookmark/link-check?url=...`
   - `POST /api/bookmark/summaries/regenerate`
   - `GET /api/bookmark/summaries/status?bookmarkId=<normalizedUrl>`
 
-### 6.4 기타
+### 6.4 유틸
 
-- `GET /api/youtube/videos/:videoId`
-- `GET /api/bookmark/metadata?url=...`
-- `GET /api/bookmark/link-check?url=...`
 - `PUT /api/providers/:provider/snapshot`
 - `GET /api/providers/:provider/items`
 - `GET /api/items/:id`
 
-## 7. 검색 엔진 상세
-
-`/api/search` 기본 모드 `relevance`는 다음 신호를 결합합니다.
-
-- exact match
-- normalized prefix match
-- PostgreSQL FTS (`tsvector`, `websearch_to_tsquery`)
-- trigram (`similarity`, `word_similarity`) 오탈자 보정
-- recency boost
-
-대표 가중치:
-
-```text
-score =
-  exact*5.0 +
-  prefix*2.5 +
-  fts*1.8 +
-  trgm*1.2 +
-  recency*0.4
-```
-
-## 8. 테스트/품질 게이트
-
-- `npm run lint`
-- `npm test`
-- `npm run build`
-- `npm run test:e2e:postgres`
-- `npm run scan:secrets`
-- `npm run audit:deps`
-
-Postgres E2E는 별도 포트(기본 `4100`)와 테스트 DB를 사용해 메인 개발 DB 오염을 방지합니다.
-
-## 9. 트러블슈팅
-
-### 9.1 요약 재생성 404
-
-- 증상: `북마크/깃허브 요약 생성 요청 실패 (404)`
-- 점검:
-  1. 서버가 최신 코드로 실행 중인지 확인 (`npm run dev:all`)
-  2. `VITE_POSTGRES_SYNC_API_BASE_URL`이 현재 서버 주소인지 확인
-  3. 대상 카드가 대시보드에 실제 등록되어 있는지 확인
-
-### 9.2 `Failed to fetch`
-
-- 서버 미기동/포트 충돌/네트워크/CORS가 원인일 가능성이 큽니다.
-- `npm run dev:status`로 서버/프론트 상태를 먼저 확인하세요.
-
-### 9.3 YouTube 추가 실패
-
-- `YOUTUBE_API_KEY` 누락 또는 quota 초과 여부 확인
-
-### 9.4 원격 읽기 전용 전환
-
-- 원격 DB 연결 장애 시 일부 쓰기 작업이 차단될 수 있습니다.
-- 연결 복구 후 자동으로 정상 모드로 전환됩니다.
-
-## 10. 관련 문서
+## 7. 문서
 
 - 제품 요구사항: `docs/PRD.md`
 - 기술 설계: `docs/TRD.md`
-- 계획 문서: `docs/PLAN.md`, `docs/PLAN_EXTENTION1.md`
+- 실행 계획: `docs/PLAN.md`, `docs/PLAN_EXTENTION1.md`
 - 운영 체크리스트: `docs/WEBAPP_ESSENTIAL_CHECKLIST_PLAN.md`
-- 백업/복구 런북: `docs/DB_BACKUP_RESTORE_RUNBOOK.md`
-- 릴리즈/롤백 런북: `docs/RELEASE_ROLLBACK_RUNBOOK.md`
-- 브라우저/모바일 QA: `docs/QA_BROWSER_MOBILE_CHECKLIST.md`
-- Mac mini 잠자기 복귀 운영: `docs/MAC_MINI_SLEEP_RESUME_DEPLOYMENT.md`
-- 서버 전용 가이드: `server/README.md`
+- 백업/복구: `docs/DB_BACKUP_RESTORE_RUNBOOK.md`
+- 릴리즈/롤백: `docs/RELEASE_ROLLBACK_RUNBOOK.md`
+- 브랜치 보호: `docs/BRANCH_PROTECTION_SETUP.md`
+- 성능 예산: `docs/PERF_BUDGETS.md`
+- 보안 키 회전: `docs/SECURITY_KEY_ROTATION_RUNBOOK.md`
+- QA 체크/로그: `docs/QA_BROWSER_MOBILE_CHECKLIST.md`, `docs/QA_BROWSER_MOBILE_LOG.md`
+- Mac mini launchd 운영: `docs/MAC_MINI_SLEEP_RESUME_DEPLOYMENT.md`
+
+## 8. 참고
+
+- 브라우저 탭 제목/아이콘은 `index.html`, `public/personal-work-info-icon.svg` 기준
+- 프로덕션에서는 `ADMIN_API_TOKEN` 설정을 권장합니다.

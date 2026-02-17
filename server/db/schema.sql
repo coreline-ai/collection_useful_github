@@ -8,7 +8,7 @@ IMMUTABLE
 PARALLEL SAFE
 AS $$
 BEGIN
-  RETURN unaccent('public.unaccent', COALESCE(input_text, ''));
+  RETURN public.unaccent(COALESCE(input_text, ''));
 END;
 $$;
 
