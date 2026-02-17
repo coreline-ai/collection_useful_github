@@ -16,9 +16,11 @@ import {
 import { CategorySettingsModal } from '@features/github/ui/CategorySettingsModal'
 import { Pagination } from '@features/github/ui/Pagination'
 import {
+  fetchBookmarkSummaryStatus,
   createBookmarkCardFromDraft,
   fetchBookmarkMetadata,
   parseBookmarkUrl,
+  regenerateBookmarkSummary,
 } from '@features/bookmark/services/bookmark'
 import { dashboardReducer, initialState } from '@features/bookmark/state/dashboardReducer'
 import { BookmarkCard } from '@features/bookmark/ui/BookmarkCard'
@@ -73,6 +75,9 @@ const hasDuplicateCategoryName = (
     return category.name.toLocaleLowerCase('ko-KR') === normalized
   })
 }
+
+const BOOKMARK_SUMMARY_POLL_INTERVAL_MS = 2000
+const BOOKMARK_SUMMARY_MAX_FAILURES = 3
 
 type DuplicateGroup = {
   key: string
@@ -215,6 +220,7 @@ export const BookmarkFeatureEntry = ({
   const [syncStatus, setSyncStatus] = useState<SyncConnectionStatus>('healthy')
   const [lastSyncSuccessAt, setLastSyncSuccessAt] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [globalWarningMessage, setGlobalWarningMessage] = useState<string | null>(null)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
@@ -224,6 +230,8 @@ export const BookmarkFeatureEntry = ({
   const saveDebounceTimeoutRef = useRef<number | null>(null)
   const saveInFlightRef = useRef(false)
   const pendingRemotePayloadRef = useRef<BookmarkSavePayload | null>(null)
+  const summaryPollTimersRef = useRef<Map<string, number>>(new Map())
+  const summaryPollFailureCountRef = useRef<Map<string, number>>(new Map())
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -271,6 +279,10 @@ export const BookmarkFeatureEntry = ({
   }, [state.categories])
 
   const duplicateGroups = useMemo(() => findDuplicateGroups(state.cards), [state.cards])
+  const summaryReadOnlyMode = !remoteEnabled || remoteSyncDegraded || hydrating
+  const summaryReadOnlyMessage = remoteEnabled
+    ? '원격 연결이 불안정해 현재 요약 재생성은 일시적으로 비활성화되었습니다.'
+    : '원격 DB API가 설정되지 않아 요약 재생성을 사용할 수 없습니다.'
 
   const persistLocalSnapshot = useCallback((payload: BookmarkSavePayload) => {
     saveBookmarkCards(payload.cards)
@@ -379,6 +391,80 @@ export const BookmarkFeatureEntry = ({
   useEffect(() => {
     cardsRef.current = state.cards
   }, [state.cards])
+
+  const clearSummaryPolling = useCallback((normalizedUrl: string) => {
+    const timerId = summaryPollTimersRef.current.get(normalizedUrl)
+    if (typeof timerId === 'number') {
+      window.clearInterval(timerId)
+    }
+
+    summaryPollTimersRef.current.delete(normalizedUrl)
+    summaryPollFailureCountRef.current.delete(normalizedUrl)
+  }, [])
+
+  const startSummaryPolling = useCallback(
+    (normalizedUrl: string) => {
+      if (summaryPollTimersRef.current.has(normalizedUrl)) {
+        return
+      }
+
+      const pollSummaryStatus = async () => {
+        try {
+          const summary = await fetchBookmarkSummaryStatus(normalizedUrl)
+          summaryPollFailureCountRef.current.set(normalizedUrl, 0)
+          dispatch({
+            type: 'patchCardSummary',
+            payload: {
+              normalizedUrl,
+              patch: {
+                summaryText: summary.summaryText,
+                summaryStatus: summary.summaryStatus,
+                summaryProvider: summary.summaryProvider,
+                summaryUpdatedAt: summary.summaryUpdatedAt,
+                summaryError: summary.summaryError,
+              },
+            },
+          })
+
+          if (
+            summary.summaryStatus === 'ready' ||
+            summary.summaryStatus === 'failed' ||
+            summary.summaryJobStatus === 'succeeded' ||
+            summary.summaryJobStatus === 'failed' ||
+            summary.summaryJobStatus === 'dead'
+          ) {
+            clearSummaryPolling(normalizedUrl)
+          }
+        } catch (error) {
+          const failureCount = (summaryPollFailureCountRef.current.get(normalizedUrl) ?? 0) + 1
+          summaryPollFailureCountRef.current.set(normalizedUrl, failureCount)
+          if (failureCount >= BOOKMARK_SUMMARY_MAX_FAILURES) {
+            dispatch({
+              type: 'patchCardSummary',
+              payload: {
+                normalizedUrl,
+                patch: {
+                  summaryText: '',
+                  summaryStatus: 'failed',
+                  summaryProvider: 'glm',
+                  summaryUpdatedAt: new Date().toISOString(),
+                  summaryError: error instanceof Error ? error.message : '요약 상태를 불러오지 못했습니다.',
+                },
+              },
+            })
+            clearSummaryPolling(normalizedUrl)
+          }
+        }
+      }
+
+      const intervalId = window.setInterval(() => {
+        void pollSummaryStatus()
+      }, BOOKMARK_SUMMARY_POLL_INTERVAL_MS)
+      summaryPollTimersRef.current.set(normalizedUrl, intervalId)
+      void pollSummaryStatus()
+    },
+    [clearSummaryPolling],
+  )
 
   useEffect(() => {
     if (!remoteEnabled) {
@@ -492,10 +578,19 @@ export const BookmarkFeatureEntry = ({
   ])
 
   useEffect(() => {
+    const summaryPollTimers = summaryPollTimersRef.current
+    const summaryPollFailures = summaryPollFailureCountRef.current
+
     return () => {
       if (saveDebounceTimeoutRef.current !== null) {
         window.clearTimeout(saveDebounceTimeoutRef.current)
       }
+
+      for (const timerId of summaryPollTimers.values()) {
+        window.clearInterval(timerId)
+      }
+      summaryPollTimers.clear()
+      summaryPollFailures.clear()
     }
   }, [])
 
@@ -597,6 +692,24 @@ export const BookmarkFeatureEntry = ({
     }
   }, [state.currentPage, visibleCards.length])
 
+  useEffect(() => {
+    const queuedBookmarkIds = new Set(
+      state.cards
+        .filter((card) => card.summaryStatus === 'queued')
+        .map((card) => card.normalizedUrl),
+    )
+
+    for (const bookmarkId of queuedBookmarkIds) {
+      startSummaryPolling(bookmarkId)
+    }
+
+    for (const [bookmarkId] of summaryPollTimersRef.current) {
+      if (!queuedBookmarkIds.has(bookmarkId)) {
+        clearSummaryPolling(bookmarkId)
+      }
+    }
+  }, [clearSummaryPolling, startSummaryPolling, state.cards])
+
   const handleSubmitBookmark = async (value: string): Promise<boolean> => {
     if (hydrating) {
       setErrorMessage('원격 데이터를 불러오는 중입니다. 잠시 후 다시 시도해 주세요.')
@@ -661,6 +774,7 @@ export const BookmarkFeatureEntry = ({
     }
 
     dispatch({ type: 'removeCard', payload: { normalizedUrl } })
+    clearSummaryPolling(normalizedUrl)
   }
 
   const handleCreateCategory = (input: string): boolean => {
@@ -740,6 +854,77 @@ export const BookmarkFeatureEntry = ({
     })
   }
 
+  const handleRegenerateSummary = async (normalizedUrl: string) => {
+    if (summaryReadOnlyMode) {
+      setGlobalWarningMessage(summaryReadOnlyMessage)
+      return
+    }
+
+    const target = state.cards.find((card) => card.normalizedUrl === normalizedUrl)
+    if (!target) {
+      return
+    }
+
+    setGlobalWarningMessage(null)
+    dispatch({
+      type: 'patchCardSummary',
+      payload: {
+        normalizedUrl,
+        patch: {
+          summaryText: target.summaryText,
+          summaryStatus: 'queued',
+          summaryProvider: 'none',
+          summaryUpdatedAt: null,
+          summaryError: null,
+        },
+      },
+    })
+
+    try {
+      const response = await regenerateBookmarkSummary(normalizedUrl, { force: true })
+      dispatch({
+        type: 'patchCardSummary',
+        payload: {
+          normalizedUrl,
+          patch: {
+            summaryText: response.summaryStatus === 'ready' ? response.summaryText : target.summaryText,
+            summaryStatus: response.summaryStatus,
+            summaryProvider: response.summaryProvider,
+            summaryUpdatedAt: response.summaryUpdatedAt,
+            summaryError: response.summaryError,
+          },
+        },
+      })
+
+      if (
+        response.summaryJobStatus === 'queued' ||
+        response.summaryJobStatus === 'running' ||
+        (response.summaryStatus === 'queued' && response.summaryJobStatus === 'idle')
+      ) {
+        startSummaryPolling(normalizedUrl)
+      } else {
+        clearSummaryPolling(normalizedUrl)
+      }
+    } catch (error) {
+      const summaryErrorMessage = error instanceof Error ? error.message : '요약 재생성에 실패했습니다.'
+      clearSummaryPolling(normalizedUrl)
+      setGlobalWarningMessage(`요약 재생성 실패: ${summaryErrorMessage}`)
+      dispatch({
+        type: 'patchCardSummary',
+        payload: {
+          normalizedUrl,
+          patch: {
+            summaryText: target.summaryText,
+            summaryStatus: 'failed',
+            summaryProvider: 'glm',
+            summaryUpdatedAt: new Date().toISOString(),
+            summaryError: summaryErrorMessage,
+          },
+        },
+      })
+    }
+  }
+
   const handleMergeDuplicateGroup = (group: DuplicateGroup) => {
     const primary = choosePrimaryCard(group.cards)
     const targets = group.cards.filter((card) => card.normalizedUrl !== primary.normalizedUrl)
@@ -808,6 +993,12 @@ export const BookmarkFeatureEntry = ({
 
         {categoryMessage && !isCategoryModalOpen ? <p className="category-message">{categoryMessage}</p> : null}
       </section>
+
+      {globalWarningMessage ? (
+        <section className="global-warning-banner" aria-live="polite" role="alert">
+          <p>{globalWarningMessage}</p>
+        </section>
+      ) : null}
 
       {state.selectedCategoryId === DEFAULT_MAIN_CATEGORY_ID ? (
         <section className="repo-input-split">
@@ -914,8 +1105,10 @@ export const BookmarkFeatureEntry = ({
                   card={card}
                   categoryName={isSearchMode ? (categoryNameById.get(card.categoryId) ?? card.categoryId) : null}
                   categories={state.categories}
+                  summaryActionDisabled={summaryReadOnlyMode}
                   onDelete={handleDeleteCard}
                   onMove={handleMoveCard}
+                  onRetrySummary={handleRegenerateSummary}
                 />
               ))}
             </div>

@@ -42,7 +42,17 @@ export type UnifiedBackupPayload = {
 
 export type BookmarkCardDraft = Omit<
   BookmarkCard,
-  'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+  | 'categoryId'
+  | 'summaryText'
+  | 'summaryStatus'
+  | 'summaryProvider'
+  | 'summaryUpdatedAt'
+  | 'summaryError'
+  | 'addedAt'
+  | 'linkStatus'
+  | 'lastCheckedAt'
+  | 'lastStatusCode'
+  | 'lastResolvedUrl'
 >
 
 export type BookmarkLinkCheckResult = {
@@ -51,6 +61,16 @@ export type BookmarkLinkCheckResult = {
   status: BookmarkLinkStatus
   statusCode: number | null
   lastCheckedAt: string
+}
+
+export type BookmarkSummaryApiResult = {
+  jobId: number | null
+  summaryJobStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
+  summaryText: string
+  summaryStatus: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryUpdatedAt: string | null
+  summaryProvider: 'glm' | 'none'
+  summaryError: string | null
 }
 
 type ApiResponse<T> = {
@@ -177,6 +197,44 @@ const toIso = (value: unknown): string => {
   return new Date().toISOString()
 }
 
+const resolveYoutubeSummaryStatus = (
+  value: unknown,
+  summaryText = '',
+): YouTubeVideoCard['summaryStatus'] => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return summaryText.trim() ? 'ready' : 'idle'
+}
+
+const resolveYoutubeSummaryProvider = (value: unknown): YouTubeVideoCard['summaryProvider'] => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const resolveBookmarkSummaryStatus = (
+  value: unknown,
+  summaryText = '',
+): BookmarkCard['summaryStatus'] => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return summaryText.trim() ? 'ready' : 'idle'
+}
+
+const resolveBookmarkSummaryProvider = (value: unknown): BookmarkCard['summaryProvider'] => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const resolveYoutubeNotebookStatus = (value: unknown): YouTubeVideoCard['notebookSourceStatus'] => {
+  if (value === 'queued' || value === 'linked' || value === 'failed') {
+    return value
+  }
+
+  return 'disabled'
+}
+
 const ensureSystemCategories = (rawCategories: Category[]): Category[] => {
   const map = new Map<string, Category>()
 
@@ -243,8 +301,10 @@ const resolveFallbackBookmarkCategories = (): { categories: Category[]; selected
 const toUnifiedYoutubeItem = (card: YouTubeVideoCard, sortIndex: number): UnifiedItem => {
   const normalizedVideoId = card.videoId || card.id
   const normalizedDescription = card.description.replace(/\s+/g, ' ').trim()
-  const summary =
-    normalizedDescription.length === 0
+  const summaryText = typeof card.summaryText === 'string' ? card.summaryText.trim() : ''
+  const summary = summaryText
+    ? summaryText
+    : normalizedDescription.length === 0
       ? '영상 설명이 없습니다.'
       : normalizedDescription.length <= 180
         ? normalizedDescription
@@ -287,6 +347,7 @@ const mapUnifiedItemToYoutubeCard = (item: UnifiedItem): YouTubeVideoCard => {
 
   if (rawCard && typeof rawCard === 'object' && rawCard.videoId) {
     const videoId = String(rawCard.videoId)
+    const summaryText = typeof rawCard.summaryText === 'string' ? rawCard.summaryText : String(item.summary || '')
     return {
       id: String(rawCard.id || videoId),
       videoId,
@@ -304,6 +365,14 @@ const mapUnifiedItemToYoutubeCard = (item: UnifiedItem): YouTubeVideoCard => {
           : typeof item.metrics?.likes === 'number'
             ? Number(item.metrics.likes)
             : null,
+      summaryText,
+      summaryStatus: resolveYoutubeSummaryStatus(rawCard.summaryStatus, summaryText),
+      summaryUpdatedAt: rawCard.summaryUpdatedAt ? toIso(rawCard.summaryUpdatedAt) : null,
+      summaryProvider: resolveYoutubeSummaryProvider(rawCard.summaryProvider),
+      summaryError: rawCard.summaryError ? String(rawCard.summaryError) : null,
+      notebookSourceStatus: resolveYoutubeNotebookStatus(rawCard.notebookSourceStatus),
+      notebookSourceId: rawCard.notebookSourceId ? String(rawCard.notebookSourceId) : null,
+      notebookId: rawCard.notebookId ? String(rawCard.notebookId) : null,
       addedAt: toIso(rawCard.addedAt || item.savedAt),
       updatedAt: toIso(rawCard.updatedAt || item.updatedAt),
     }
@@ -323,20 +392,31 @@ const mapUnifiedItemToYoutubeCard = (item: UnifiedItem): YouTubeVideoCard => {
     publishedAt: toIso(item.createdAt),
     viewCount: Number(item.metrics?.views ?? 0),
     likeCount: typeof item.metrics?.likes === 'number' ? Number(item.metrics.likes) : null,
+    summaryText: String(item.summary || ''),
+    summaryStatus: resolveYoutubeSummaryStatus('ready', String(item.summary || '')),
+    summaryUpdatedAt: toIso(item.updatedAt),
+    summaryProvider: 'none',
+    summaryError: null,
+    notebookSourceStatus: 'disabled',
+    notebookSourceId: null,
+    notebookId: null,
     addedAt: toIso(item.savedAt),
     updatedAt: toIso(item.updatedAt),
   }
 }
 
 const toUnifiedBookmarkItem = (card: BookmarkCard, sortIndex: number): UnifiedItem => {
+  const normalizedSummaryText = typeof card.summaryText === 'string' ? card.summaryText.trim() : ''
+  const summary = normalizedSummaryText || card.excerpt
+
   return {
     id: `bookmark:${card.normalizedUrl}`,
     provider: 'bookmark',
     type: 'bookmark',
     nativeId: card.normalizedUrl,
     title: card.title,
-    summary: card.excerpt,
-    description: card.excerpt,
+    summary,
+    description: summary,
     url: card.url,
     tags: Array.isArray(card.tags) ? card.tags : [],
     author: card.domain,
@@ -354,7 +434,14 @@ const toUnifiedBookmarkItem = (card: BookmarkCard, sortIndex: number): UnifiedIt
       lastStatusCode: card.lastStatusCode,
       lastResolvedUrl: card.lastResolvedUrl,
       sortIndex,
-      card,
+      card: {
+        ...card,
+        summaryText: normalizedSummaryText,
+        summaryStatus: resolveBookmarkSummaryStatus(card.summaryStatus, normalizedSummaryText),
+        summaryProvider: resolveBookmarkSummaryProvider(card.summaryProvider),
+        summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+        summaryError: card.summaryError ? String(card.summaryError) : null,
+      },
     },
   }
 }
@@ -364,6 +451,10 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
 
   if (rawCard && typeof rawCard === 'object' && rawCard.normalizedUrl) {
     const normalizedUrl = String(rawCard.normalizedUrl)
+    const excerpt = String(rawCard.excerpt || item.summary || item.description || '')
+    const summaryText = typeof rawCard.summaryText === 'string' ? rawCard.summaryText : ''
+    const resolvedSummaryText =
+      summaryText.trim() || (item.summary && item.summary !== excerpt ? String(item.summary) : '')
 
     return {
       id: String(rawCard.id || normalizedUrl),
@@ -373,7 +464,12 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
       canonicalUrl: rawCard.canonicalUrl ? String(rawCard.canonicalUrl) : null,
       domain: String(rawCard.domain || item.author || ''),
       title: String(rawCard.title || item.title || normalizedUrl),
-      excerpt: String(rawCard.excerpt || item.summary || item.description || ''),
+      excerpt,
+      summaryText: resolvedSummaryText,
+      summaryStatus: resolveBookmarkSummaryStatus(rawCard.summaryStatus, resolvedSummaryText),
+      summaryProvider: resolveBookmarkSummaryProvider(rawCard.summaryProvider),
+      summaryUpdatedAt: rawCard.summaryUpdatedAt ? toIso(rawCard.summaryUpdatedAt) : null,
+      summaryError: rawCard.summaryError ? String(rawCard.summaryError) : null,
       thumbnailUrl: rawCard.thumbnailUrl ? String(rawCard.thumbnailUrl) : null,
       faviconUrl: rawCard.faviconUrl ? String(rawCard.faviconUrl) : null,
       tags: Array.isArray(rawCard.tags) ? rawCard.tags.map((tag) => String(tag)) : item.tags || [],
@@ -400,7 +496,8 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
 
   const normalizedUrl = String(item.nativeId || item.url || '')
   const domain = item.author || ''
-  const excerpt = item.summary || item.description || '미리보기를 가져오지 못했습니다.'
+  const excerpt = item.description || item.summary || '미리보기를 가져오지 못했습니다.'
+  const summaryText = item.summary && item.summary !== excerpt ? String(item.summary) : ''
 
   return {
     id: normalizedUrl,
@@ -411,6 +508,11 @@ const mapUnifiedItemToBookmarkCard = (item: UnifiedItem): BookmarkCard => {
     domain,
     title: item.title || domain || normalizedUrl,
     excerpt,
+    summaryText,
+    summaryStatus: resolveBookmarkSummaryStatus('ready', summaryText),
+    summaryProvider: 'none',
+    summaryUpdatedAt: toIso(item.updatedAt),
+    summaryError: null,
     thumbnailUrl: null,
     faviconUrl: null,
     tags: Array.isArray(item.tags) ? item.tags.map((tag) => String(tag)) : [],
@@ -749,6 +851,87 @@ export const checkBookmarkLinkStatus = async (url: string): Promise<BookmarkLink
         : null,
     lastCheckedAt: toIso(payload.result.lastCheckedAt),
   }
+}
+
+const resolveBookmarkSummaryApiResult = (payload: Record<string, unknown>): BookmarkSummaryApiResult => {
+  const summaryText = typeof payload.summaryText === 'string' ? payload.summaryText : ''
+
+  return {
+    jobId: typeof payload.jobId === 'number' ? payload.jobId : null,
+    summaryJobStatus:
+      payload.summaryJobStatus === 'queued' ||
+      payload.summaryJobStatus === 'running' ||
+      payload.summaryJobStatus === 'succeeded' ||
+      payload.summaryJobStatus === 'failed' ||
+      payload.summaryJobStatus === 'dead'
+        ? payload.summaryJobStatus
+        : 'idle',
+    summaryText,
+    summaryStatus: resolveBookmarkSummaryStatus(payload.summaryStatus, summaryText),
+    summaryUpdatedAt: payload.summaryUpdatedAt ? toIso(payload.summaryUpdatedAt) : null,
+    summaryProvider: resolveBookmarkSummaryProvider(payload.summaryProvider),
+    summaryError: payload.summaryError ? String(payload.summaryError) : null,
+  }
+}
+
+export const regenerateBookmarkSummary = async (
+  bookmarkId: string,
+  options: { force?: boolean } = {},
+): Promise<BookmarkSummaryApiResult> => {
+  if (!isRemoteSnapshotEnabled()) {
+    throw new Error('원격 DB API가 설정되지 않았습니다.')
+  }
+
+  const response = await requestWithRetry('/api/bookmark/summaries/regenerate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      bookmarkId,
+      force: Boolean(options.force),
+    }),
+  })
+
+  if (!response.ok) {
+    const fallbackMessage =
+      response.status === 404
+        ? '북마크 요약 API 라우트를 찾을 수 없습니다. 서버를 최신 코드로 재시작해 주세요.'
+        : `북마크 요약 생성 요청 실패 (${response.status})`
+    throw new Error(await parseErrorMessage(response, fallbackMessage))
+  }
+
+  const payload = (await response.json()) as ApiResponse<Record<string, unknown>>
+  if (!payload.ok) {
+    throw new Error(payload.message || '북마크 요약 생성 요청에 실패했습니다.')
+  }
+
+  return resolveBookmarkSummaryApiResult(payload)
+}
+
+export const fetchBookmarkSummaryStatus = async (bookmarkId: string): Promise<BookmarkSummaryApiResult> => {
+  if (!isRemoteSnapshotEnabled()) {
+    throw new Error('원격 DB API가 설정되지 않았습니다.')
+  }
+
+  const response = await requestWithRetry(
+    `/api/bookmark/summaries/status?bookmarkId=${encodeURIComponent(bookmarkId)}`,
+  )
+
+  if (!response.ok) {
+    const fallbackMessage =
+      response.status === 404
+        ? '북마크 요약 상태 API 라우트를 찾을 수 없습니다. 서버를 최신 코드로 재시작해 주세요.'
+        : `북마크 요약 상태 조회 실패 (${response.status})`
+    throw new Error(await parseErrorMessage(response, fallbackMessage))
+  }
+
+  const payload = (await response.json()) as ApiResponse<Record<string, unknown>>
+  if (!payload.ok) {
+    throw new Error(payload.message || '북마크 요약 상태 조회에 실패했습니다.')
+  }
+
+  return resolveBookmarkSummaryApiResult(payload)
 }
 
 export const searchUnifiedItems = async (params: UnifiedSearchParams): Promise<UnifiedItem[]> => {

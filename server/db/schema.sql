@@ -126,3 +126,119 @@ CREATE INDEX IF NOT EXISTS idx_github_dashboard_history_revision
 
 CREATE INDEX IF NOT EXISTS idx_github_dashboard_history_created
   ON github_dashboard_history (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS github_summary_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  repo_id TEXT NOT NULL,
+  request_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'dead')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts >= 1),
+  next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at TIMESTAMPTZ NULL,
+  locked_by TEXT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result_summary TEXT NULL,
+  error_code TEXT NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_summary_jobs_status_next
+  ON github_summary_jobs (status, next_run_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_github_summary_jobs_repo_created
+  ON github_summary_jobs (repo_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS github_summary_cache (
+  repo_id TEXT PRIMARY KEY,
+  metadata_hash TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  summary_text TEXT NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  last_success_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_summary_cache_expiry
+  ON github_summary_cache (expires_at ASC);
+
+CREATE TABLE IF NOT EXISTS youtube_summary_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  video_id TEXT NOT NULL,
+  request_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'dead')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts >= 1),
+  next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at TIMESTAMPTZ NULL,
+  locked_by TEXT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result_summary TEXT NULL,
+  error_code TEXT NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_summary_jobs_status_next
+  ON youtube_summary_jobs (status, next_run_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_summary_jobs_video_created
+  ON youtube_summary_jobs (video_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS youtube_summary_cache (
+  video_id TEXT PRIMARY KEY,
+  metadata_hash TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  summary_text TEXT NOT NULL,
+  notebook_source_id TEXT NULL,
+  notebook_id TEXT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  last_success_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_youtube_summary_cache_expiry
+  ON youtube_summary_cache (expires_at ASC);
+
+CREATE TABLE IF NOT EXISTS bookmark_summary_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  bookmark_id TEXT NOT NULL,
+  request_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'dead')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts >= 1),
+  next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at TIMESTAMPTZ NULL,
+  locked_by TEXT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  result_summary TEXT NULL,
+  error_code TEXT NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bookmark_summary_jobs_status_next
+  ON bookmark_summary_jobs (status, next_run_at ASC);
+
+CREATE INDEX IF NOT EXISTS idx_bookmark_summary_jobs_bookmark_created
+  ON bookmark_summary_jobs (bookmark_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS bookmark_summary_cache (
+  bookmark_id TEXT PRIMARY KEY,
+  metadata_hash TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  summary_text TEXT NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  last_success_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bookmark_summary_cache_expiry
+  ON bookmark_summary_cache (expires_at ASC);

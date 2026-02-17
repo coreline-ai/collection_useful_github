@@ -8,11 +8,42 @@ type YoutubeCardProps = {
   categoryName?: string | null
   onDelete: (videoId: string) => void
   onMove: (videoId: string, targetCategoryId: CategoryId) => void
+  onRetrySummary: (videoId: string) => void
 }
 
-export const YoutubeCard = ({ card, categories, categoryName, onDelete, onMove }: YoutubeCardProps) => {
+const summaryStatusLabel = (status: YouTubeVideoCard['summaryStatus']): string => {
+  if (status === 'queued') {
+    return '요약 준비중'
+  }
+
+  if (status === 'ready') {
+    return '요약 완료'
+  }
+
+  if (status === 'failed') {
+    return '요약 실패'
+  }
+
+  return '요약 대기'
+}
+
+export const YoutubeCard = ({
+  card,
+  categories,
+  categoryName,
+  onDelete,
+  onMove,
+  onRetrySummary,
+}: YoutubeCardProps) => {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false)
+  const [isSummaryTooltipOpen, setIsSummaryTooltipOpen] = useState(false)
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
+  const summaryTooltipRef = useRef<HTMLDivElement | null>(null)
+  const safeVideoId = String(card.videoId || card.id || 'unknown-video')
+  const summaryText =
+    card.summaryText || (card.summaryStatus === 'queued' ? '요약 생성 중입니다...' : '요약이 아직 없습니다.')
+  const summaryTooltipId = `youtube-summary-tooltip-${safeVideoId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   useEffect(() => {
     if (!isMoveMenuOpen) {
@@ -30,6 +61,43 @@ export const YoutubeCard = ({ card, categories, categoryName, onDelete, onMove }
     window.addEventListener('mousedown', handleOutsideClick)
     return () => window.removeEventListener('mousedown', handleOutsideClick)
   }, [isMoveMenuOpen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+
+    const mediaQuery = window.matchMedia('(hover: none), (pointer: coarse)')
+    const apply = () => {
+      setIsCoarsePointer(mediaQuery.matches)
+    }
+
+    apply()
+    mediaQuery.addEventListener('change', apply)
+    return () => {
+      mediaQuery.removeEventListener('change', apply)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isSummaryTooltipOpen) {
+      return
+    }
+
+    const closeIfOutside = (event: MouseEvent | TouchEvent) => {
+      if (summaryTooltipRef.current?.contains(event.target as Node)) {
+        return
+      }
+      setIsSummaryTooltipOpen(false)
+    }
+
+    window.addEventListener('mousedown', closeIfOutside)
+    window.addEventListener('touchstart', closeIfOutside, { passive: true })
+    return () => {
+      window.removeEventListener('mousedown', closeIfOutside)
+      window.removeEventListener('touchstart', closeIfOutside)
+    }
+  }, [isSummaryTooltipOpen])
 
   return (
     <article className="repo-card youtube-card">
@@ -92,6 +160,52 @@ export const YoutubeCard = ({ card, categories, categoryName, onDelete, onMove }
         <span>조회수: {formatNumber(card.viewCount)}</span>
         <span>게시일: {formatDate(card.publishedAt)}</span>
       </div>
+
+      <section className="youtube-summary-panel" aria-live="polite">
+        <div className="youtube-summary-header">
+          <span className={`youtube-summary-badge summary-${card.summaryStatus}`}>{summaryStatusLabel(card.summaryStatus)}</span>
+          {card.summaryStatus === 'failed' || card.summaryStatus === 'ready' ? (
+            <button
+              type="button"
+              className="youtube-summary-retry"
+              onClick={() => onRetrySummary(safeVideoId)}
+            >
+              요약 재생성
+            </button>
+          ) : null}
+        </div>
+        <div
+          className={`youtube-summary-tooltip-wrap ${isSummaryTooltipOpen ? 'is-open' : ''}`}
+          ref={summaryTooltipRef}
+        >
+          <p
+            className="repo-summary youtube-summary"
+            aria-describedby={summaryTooltipId}
+            tabIndex={0}
+            onClick={() => {
+              if (!isCoarsePointer) {
+                return
+              }
+              setIsSummaryTooltipOpen((current) => !current)
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') {
+                return
+              }
+              event.preventDefault()
+              setIsSummaryTooltipOpen((current) => !current)
+            }}
+          >
+            {summaryText}
+          </p>
+          <span id={summaryTooltipId} role="tooltip" className="youtube-summary-tooltip">
+            {summaryText}
+          </span>
+        </div>
+        {card.summaryStatus === 'failed' && card.summaryError ? (
+          <p className="youtube-summary-error">{card.summaryError}</p>
+        ) : null}
+      </section>
 
       <footer className="repo-card-footer">
         <a href={card.videoUrl} target="_blank" rel="noreferrer">

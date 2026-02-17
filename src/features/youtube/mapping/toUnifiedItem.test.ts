@@ -16,6 +16,14 @@ describe('toYoutubeUnifiedItem', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         viewCount: 123,
         likeCount: 7,
+        summaryText: '핵심 요약',
+        summaryStatus: 'ready',
+        summaryUpdatedAt: '2026-01-03T00:00:00.000Z',
+        summaryProvider: 'glm',
+        summaryError: null,
+        notebookSourceStatus: 'disabled',
+        notebookSourceId: null,
+        notebookId: null,
         addedAt: '2026-01-02T00:00:00.000Z',
         updatedAt: '2026-01-03T00:00:00.000Z',
       },
@@ -27,6 +35,7 @@ describe('toYoutubeUnifiedItem', () => {
     expect(item.type).toBe('video')
     expect(item.nativeId).toBe('dQw4w9WgXcQ')
     expect(item.title).toBe('Never Gonna Give You Up')
+    expect(item.summary).toBe('핵심 요약')
     expect(item.author).toBe('Rick Astley')
     expect(item.metrics).toEqual({ views: 123, likes: 7 })
     expect(item.raw).toMatchObject({ categoryId: 'main', sortIndex: 3 })
@@ -46,6 +55,14 @@ describe('toYoutubeUnifiedItem', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         viewCount: 0,
         likeCount: null,
+        summaryText: '',
+        summaryStatus: 'idle',
+        summaryUpdatedAt: null,
+        summaryProvider: 'none',
+        summaryError: null,
+        notebookSourceStatus: 'disabled',
+        notebookSourceId: null,
+        notebookId: null,
         addedAt: '2026-01-02T00:00:00.000Z',
         updatedAt: '2026-01-02T00:00:00.000Z',
       },

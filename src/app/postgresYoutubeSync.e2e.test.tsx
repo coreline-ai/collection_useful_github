@@ -7,11 +7,23 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
+  regenerateGithubSummary: vi.fn(),
+  fetchGithubSummaryStatus: vi.fn(),
 }))
 
 vi.mock('@features/youtube/services/youtube', () => ({
   parseYouTubeVideoUrl: vi.fn(),
   fetchYouTubeVideo: vi.fn(),
+  summarizeYouTubeVideo: vi.fn().mockResolvedValue({
+    summaryText: '요약',
+    summaryStatus: 'ready',
+    summaryUpdatedAt: '2026-02-15T00:00:00.000Z',
+    summaryProvider: 'glm',
+    summaryError: null,
+    notebookSourceStatus: 'disabled',
+    notebookSourceId: null,
+    notebookId: null,
+  }),
   buildYouTubeSummary: vi.fn((value: string) => value),
 }))
 
@@ -37,6 +49,14 @@ const mockYoutubeCard: YouTubeVideoCard = {
   publishedAt: '2026-02-15T00:00:00.000Z',
   viewCount: 100,
   likeCount: 5,
+  summaryText: '',
+  summaryStatus: 'idle',
+  summaryUpdatedAt: null,
+  summaryProvider: 'none',
+  summaryError: null,
+  notebookSourceStatus: 'disabled',
+  notebookSourceId: null,
+  notebookId: null,
   addedAt: '2026-02-15T00:00:00.000Z',
   updatedAt: '2026-02-15T00:00:00.000Z',
 }

@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchBookmarkMetadata, parseBookmarkUrl } from './bookmark'
+import {
+  fetchBookmarkMetadata,
+  fetchBookmarkSummaryStatus,
+  parseBookmarkUrl,
+  regenerateBookmarkSummary,
+} from './bookmark'
 
 vi.mock('@core/data/adapters/remoteDb', () => ({
   fetchBookmarkMetadata: vi.fn(),
+  regenerateBookmarkSummary: vi.fn(),
+  fetchBookmarkSummaryStatus: vi.fn(),
 }))
 
-const { fetchBookmarkMetadata: fetchBookmarkMetadataFromRemote } = await import('@core/data/adapters/remoteDb')
+const {
+  fetchBookmarkMetadata: fetchBookmarkMetadataFromRemote,
+  regenerateBookmarkSummary: regenerateBookmarkSummaryFromRemote,
+  fetchBookmarkSummaryStatus: fetchBookmarkSummaryStatusFromRemote,
+} = await import('@core/data/adapters/remoteDb')
 
 describe('bookmark service', () => {
   beforeEach(() => {
@@ -63,5 +74,41 @@ describe('bookmark service', () => {
     expect(metadata.title).toBe('Post title')
     expect(metadata.domain).toBe('example.com')
     expect(metadata.metadataStatus).toBe('ok')
+  })
+
+  it('requests bookmark summary regeneration', async () => {
+    vi.mocked(regenerateBookmarkSummaryFromRemote).mockResolvedValue({
+      jobId: 101,
+      summaryJobStatus: 'queued',
+      summaryText: '',
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+    })
+
+    const result = await regenerateBookmarkSummary('https://example.com/post', { force: true })
+
+    expect(regenerateBookmarkSummaryFromRemote).toHaveBeenCalledWith('https://example.com/post', {
+      force: true,
+    })
+    expect(result.summaryStatus).toBe('queued')
+  })
+
+  it('fetches bookmark summary status', async () => {
+    vi.mocked(fetchBookmarkSummaryStatusFromRemote).mockResolvedValue({
+      jobId: 101,
+      summaryJobStatus: 'succeeded',
+      summaryText: '요약 문장',
+      summaryStatus: 'ready',
+      summaryUpdatedAt: '2026-02-17T10:00:00.000Z',
+      summaryProvider: 'glm',
+      summaryError: null,
+    })
+
+    const result = await fetchBookmarkSummaryStatus('https://example.com/post')
+
+    expect(fetchBookmarkSummaryStatusFromRemote).toHaveBeenCalledWith('https://example.com/post')
+    expect(result.summaryText).toBe('요약 문장')
   })
 })

@@ -31,6 +31,24 @@ cp .env.example .env
 | `CORS_ORIGIN` | `http://localhost:5173,http://localhost:5174` | 허용 Origin(콤마 구분) |
 | `YOUTUBE_API_KEY` | - | YouTube Data API v3 키 |
 | `YOUTUBE_API_TIMEOUT_SECONDS` | `12` | YouTube API 타임아웃 |
+| `YOUTUBE_SUMMARY_ENABLED` | `true` | YouTube 요약 생성 활성화 |
+| `YOUTUBE_SUMMARY_PROVIDER` | `glm` | 요약 엔진 (`glm`) |
+| `YOUTUBE_SUMMARY_TIMEOUT_SECONDS` | `30` | 요약 생성 타임아웃(초) |
+| `NOTEBOOKLM_ENABLED` | `false` | NotebookLM source 연동 활성화 |
+| `NOTEBOOKLM_PROJECT_ID` | - | NotebookLM 프로젝트 ID |
+| `NOTEBOOKLM_LOCATION` | `global` | NotebookLM 리전 |
+| `NOTEBOOKLM_ENDPOINT_LOCATION` | `global` | NotebookLM API endpoint 위치 (`global/us/eu`) |
+| `NOTEBOOKLM_NOTEBOOK_ID` | - | NotebookLM 노트북 ID |
+| `NOTEBOOKLM_SERVICE_ACCOUNT_JSON` | - | 서비스 계정 JSON 문자열/파일경로/base64(JSON) |
+| `GLM_API_KEY` | - | GLM 요약 API 키 |
+| `GLM_BASE_URL` | `https://api.z.ai/api/coding/paas/v4` | GLM API Base URL |
+| `GLM_MODEL` | `glm-4.7` | GLM 모델 |
+| `GITHUB_SUMMARY_ENABLED` | `true` | GitHub 요약 재생성 활성화 |
+| `GITHUB_SUMMARY_PROVIDER` | `glm` | GitHub 요약 엔진 |
+| `GITHUB_SUMMARY_TIMEOUT_SECONDS` | `30` | GitHub 요약 생성 타임아웃(초) |
+| `GITHUB_SUMMARY_README_MAX_BYTES` | `8192` | GitHub README 입력 최대 바이트 |
+| `GITHUB_API_TOKEN` | - | GitHub API 토큰(요청 제한 완화) |
+| `GITHUB_API_TIMEOUT_SECONDS` | `12` | GitHub API 타임아웃 |
 | `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 추출 timeout(ms) |
 | `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 북마크 HTML 최대 읽기 바이트 |
 
@@ -95,8 +113,16 @@ docker compose up -d
 ## 5.5 YouTube
 
 - `GET /api/youtube/videos/:videoId`
+- `POST /api/youtube/videos/:videoId/summarize`
 
-## 5.6 Bookmark
+## 5.6 GitHub Summary
+
+- `POST /api/github/summaries/regenerate`
+- `GET /api/github/summaries/status?repoId=owner/repo`
+
+`NOTEBOOKLM_ENABLED=true`일 때 `/summarize`는 NotebookLM source를 먼저 조회/생성하고, 동시에 GLM 텍스트 요약을 생성해 카드 상태에 반영합니다.
+
+## 5.7 Bookmark
 
 - `GET /api/bookmark/metadata?url=...`
 - `GET /api/bookmark/link-check?url=...`

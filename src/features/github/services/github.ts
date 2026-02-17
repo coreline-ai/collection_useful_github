@@ -1,4 +1,5 @@
 import { DEFAULT_MAIN_CATEGORY_ID } from '@constants'
+import { getRemoteBaseUrl } from '@core/data/adapters/remoteDb'
 import type { GitHubRepoCard, RepoActivityItem, RepoDetailData } from '@shared/types'
 import { buildSummary } from '@utils/summary'
 
@@ -54,6 +55,16 @@ type GitHubIssueResponse = {
   }
 }
 
+type GithubSummaryApiResult = {
+  jobId: number | null
+  summaryJobStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
+  summaryText: string
+  summaryStatus: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryUpdatedAt: string | null
+  summaryProvider: 'glm' | 'none'
+  summaryError: string | null
+}
+
 export class GitHubApiError extends Error {
   status: number
 
@@ -71,6 +82,7 @@ const githubTimeoutMs = (() => {
   const seconds = Number.isFinite(parsed) && parsed > 0 ? parsed : 12
   return Math.floor(seconds * 1000)
 })()
+const remoteApiToken = (import.meta.env.VITE_POSTGRES_SYNC_API_TOKEN as string | undefined)?.trim() ?? ''
 
 const createHeaders = (): HeadersInit => {
   const headers: HeadersInit = {
@@ -270,7 +282,179 @@ export const fetchRepo = async (owner: string, repo: string): Promise<GitHubRepo
     createdAt: payload.created_at,
     updatedAt: payload.updated_at,
     addedAt: new Date().toISOString(),
+    summaryStatus: summary.trim() ? 'ready' : 'idle',
+    summaryProvider: 'none',
+    summaryUpdatedAt: null,
+    summaryError: null,
   }
+}
+
+const resolveGithubSummaryApiResult = (payload: Record<string, unknown>): GithubSummaryApiResult => {
+  const summaryText = typeof payload.summaryText === 'string' ? payload.summaryText : ''
+  const summaryJobStatus: GithubSummaryApiResult['summaryJobStatus'] =
+    payload.summaryJobStatus === 'queued' ||
+    payload.summaryJobStatus === 'running' ||
+    payload.summaryJobStatus === 'succeeded' ||
+    payload.summaryJobStatus === 'failed' ||
+    payload.summaryJobStatus === 'dead'
+      ? payload.summaryJobStatus
+      : 'idle'
+
+  let summaryStatus: GithubSummaryApiResult['summaryStatus'] =
+    payload.summaryStatus === 'queued' ||
+    payload.summaryStatus === 'ready' ||
+    payload.summaryStatus === 'failed'
+      ? payload.summaryStatus
+      : summaryText.trim()
+        ? 'ready'
+        : 'idle'
+
+  // Some server versions can return queued even after succeeded.
+  if (summaryJobStatus === 'succeeded' && summaryStatus === 'queued') {
+    summaryStatus = summaryText.trim() ? 'ready' : 'queued'
+  }
+
+  if ((summaryJobStatus === 'failed' || summaryJobStatus === 'dead') && summaryStatus === 'queued') {
+    summaryStatus = 'failed'
+  }
+
+  return {
+    jobId: typeof payload.jobId === 'number' ? payload.jobId : null,
+    summaryJobStatus,
+    summaryText,
+    summaryStatus,
+    summaryUpdatedAt: payload.summaryUpdatedAt ? String(payload.summaryUpdatedAt) : null,
+    summaryProvider: payload.summaryProvider === 'glm' ? 'glm' : 'none',
+    summaryError: payload.summaryError ? String(payload.summaryError) : null,
+  }
+}
+
+const readSummaryApiPayload = async (
+  response: Response,
+): Promise<{ payload: Record<string, unknown>; rawText: string }> => {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || ''
+
+  if (contentType.includes('application/json')) {
+    const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+    return { payload, rawText: '' }
+  }
+
+  const rawText = await response.text().catch(() => '')
+  const trimmed = rawText.trim()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>
+      return { payload: parsed, rawText }
+    } catch {
+      // ignore malformed payload
+    }
+  }
+
+  return { payload: {}, rawText }
+}
+
+const buildSummaryApiFailureMessage = (
+  response: Response,
+  payload: Record<string, unknown>,
+  rawText: string,
+  fallback: string,
+): string => {
+  const payloadMessage = typeof payload.message === 'string' ? payload.message.trim() : ''
+  if (response.status === 404) {
+    const lowerPayloadMessage = payloadMessage.toLowerCase()
+    const lowerText = rawText.toLowerCase()
+    if (
+      lowerPayloadMessage === 'not found' ||
+      lowerPayloadMessage.includes('cannot post /api/github/summaries/regenerate') ||
+      lowerPayloadMessage.includes('cannot get /api/github/summaries/status') ||
+      lowerText.includes('cannot post /api/github/summaries/regenerate') ||
+      lowerText.includes('cannot get /api/github/summaries/status')
+    ) {
+      return '요약 API 경로를 찾지 못했습니다. 서버를 최신 버전으로 재기동해 주세요.'
+    }
+
+    if (payloadMessage) {
+      return payloadMessage
+    }
+
+    return '요약 대상 GitHub 카드가 원격 대시보드에 없습니다. 카드를 먼저 저장/동기화해 주세요.'
+  }
+
+  if (payloadMessage) {
+    return payloadMessage
+  }
+
+  if (response.status === 401) {
+    return '요약 API 인증에 실패했습니다. VITE_POSTGRES_SYNC_API_TOKEN 또는 서버 ADMIN_API_TOKEN을 확인해 주세요.'
+  }
+
+  return fallback
+}
+
+export const regenerateGithubSummary = async (
+  repoId: string,
+  options: { force?: boolean } = {},
+): Promise<GithubSummaryApiResult> => {
+  const remoteBaseUrl = getRemoteBaseUrl()
+  if (!remoteBaseUrl) {
+    throw new Error('원격 DB API가 설정되지 않았습니다. VITE_POSTGRES_SYNC_API_BASE_URL을 확인해 주세요.')
+  }
+
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+  })
+
+  if (remoteApiToken) {
+    headers.set('x-admin-token', remoteApiToken)
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${remoteBaseUrl}/api/github/summaries/regenerate`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        repoId: repoId.toLowerCase(),
+        force: Boolean(options.force),
+      }),
+    })
+  } catch (error) {
+    const message =
+      error instanceof Error && error.name === 'AbortError'
+        ? '요약 API 요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
+        : '요약 API 연결에 실패했습니다. 서버 상태와 CORS 설정을 확인해 주세요.'
+    throw new Error(message)
+  }
+
+  const { payload, rawText } = await readSummaryApiPayload(response)
+
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(
+      buildSummaryApiFailureMessage(response, payload, rawText, `GitHub 요약 생성 요청 실패 (${response.status})`),
+    )
+  }
+
+  return resolveGithubSummaryApiResult(payload)
+}
+
+export const fetchGithubSummaryStatus = async (repoId: string): Promise<GithubSummaryApiResult> => {
+  const remoteBaseUrl = getRemoteBaseUrl()
+  if (!remoteBaseUrl) {
+    throw new Error('원격 DB API가 설정되지 않았습니다. VITE_POSTGRES_SYNC_API_BASE_URL을 확인해 주세요.')
+  }
+
+  const response = await fetch(
+    `${remoteBaseUrl}/api/github/summaries/status?repoId=${encodeURIComponent(repoId.toLowerCase())}`,
+  )
+  const { payload, rawText } = await readSummaryApiPayload(response)
+
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(
+      buildSummaryApiFailureMessage(response, payload, rawText, `GitHub 요약 상태 조회 실패 (${response.status})`),
+    )
+  }
+
+  return resolveGithubSummaryApiResult(payload)
 }
 
 export const fetchRepoDetail = async (owner: string, repo: string): Promise<RepoDetailData> => {

@@ -7,6 +7,8 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn().mockResolvedValue({ readmePreview: null, recentActivity: [] }),
   fetchLatestCommitSha: vi.fn().mockResolvedValue(null),
+  regenerateGithubSummary: vi.fn(),
+  fetchGithubSummaryStatus: vi.fn(),
 }))
 
 vi.mock('@core/data/adapters/remoteDb', () => ({

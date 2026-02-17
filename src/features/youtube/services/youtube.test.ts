@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildYouTubeSummary, fetchYouTubeVideo, parseYouTubeVideoUrl } from './youtube'
+import {
+  buildYouTubeSummary,
+  fetchYouTubeSummaryStatus,
+  fetchYouTubeVideo,
+  parseYouTubeVideoUrl,
+  summarizeYouTubeVideo,
+} from './youtube'
 
 vi.mock('@core/data/adapters/remoteDb', () => ({
   getRemoteBaseUrl: vi.fn(() => 'http://localhost:4000'),
@@ -56,6 +62,14 @@ describe('youtube service', () => {
           viewCount: 100,
           likeCount: 3,
           url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          summaryText: '요약',
+          summaryStatus: 'ready',
+          summaryUpdatedAt: '2026-01-01T00:00:00.000Z',
+          summaryProvider: 'glm',
+          summaryError: null,
+          notebookSourceStatus: 'disabled',
+          notebookSourceId: null,
+          notebookId: null,
         },
       }),
     )
@@ -66,6 +80,8 @@ describe('youtube service', () => {
     expect(card.videoId).toBe('dQw4w9WgXcQ')
     expect(card.channelTitle).toBe('Rick Astley')
     expect(card.viewCount).toBe(100)
+    expect(card.summaryStatus).toBe('ready')
+    expect(card.summaryText).toBe('요약')
   })
 
   it('throws when remote base is missing', async () => {
@@ -74,5 +90,52 @@ describe('youtube service', () => {
     await expect(fetchYouTubeVideo('dQw4w9WgXcQ')).rejects.toThrow(
       '원격 DB API가 설정되지 않았습니다. VITE_POSTGRES_SYNC_API_BASE_URL을 확인해 주세요.',
     )
+  })
+
+  it('requests summarize endpoint and maps response fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        summaryJobStatus: 'succeeded',
+        summaryText: '핵심 요약',
+        summaryStatus: 'ready',
+        summaryUpdatedAt: '2026-01-01T00:00:00.000Z',
+        summaryProvider: 'glm',
+        summaryError: null,
+        notebookSourceStatus: 'disabled',
+        notebookSourceId: null,
+        notebookId: null,
+      }),
+    )
+
+    const summary = await summarizeYouTubeVideo('dQw4w9WgXcQ', { force: true })
+
+    expect(summary.summaryStatus).toBe('ready')
+    expect(summary.summaryText).toBe('핵심 요약')
+    expect(summary.summaryProvider).toBe('glm')
+    expect(summary.summaryJobStatus).toBe('succeeded')
+  })
+
+  it('requests summary status endpoint and maps queue fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        jobId: 12,
+        summaryJobStatus: 'running',
+        summaryText: '',
+        summaryStatus: 'queued',
+        summaryUpdatedAt: null,
+        summaryProvider: 'none',
+        summaryError: null,
+        notebookSourceStatus: 'disabled',
+        notebookSourceId: null,
+        notebookId: null,
+      }),
+    )
+
+    const status = await fetchYouTubeSummaryStatus('dQw4w9WgXcQ')
+    expect(status.jobId).toBe(12)
+    expect(status.summaryJobStatus).toBe('running')
+    expect(status.summaryStatus).toBe('queued')
   })
 })

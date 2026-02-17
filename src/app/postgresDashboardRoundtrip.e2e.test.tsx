@@ -7,6 +7,8 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
+  regenerateGithubSummary: vi.fn(),
+  fetchGithubSummaryStatus: vi.fn(),
 }))
 
 const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
@@ -141,6 +143,6 @@ describeIfPostgresE2E('PostgreSQL dashboard roundtrip E2E', () => {
     render(<App />)
 
     await screen.findByText('next.js')
-    expect(screen.getByText('Next.js summary')).toBeInTheDocument()
+    expect(screen.getAllByText('Next.js summary').length).toBeGreaterThan(0)
   })
 })

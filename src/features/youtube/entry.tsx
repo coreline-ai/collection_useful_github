@@ -16,8 +16,10 @@ import {
 import { CategorySettingsModal } from '@features/github/ui/CategorySettingsModal'
 import { Pagination } from '@features/github/ui/Pagination'
 import {
+  fetchYouTubeSummaryStatus,
   fetchYouTubeVideo,
   parseYouTubeVideoUrl,
+  summarizeYouTubeVideo,
 } from '@features/youtube/services/youtube'
 import { dashboardReducer, initialState } from '@features/youtube/state/dashboardReducer'
 import { YoutubeCard } from '@features/youtube/ui/YoutubeCard'
@@ -86,6 +88,8 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
   const saveDebounceTimeoutRef = useRef<number | null>(null)
   const saveInFlightRef = useRef(false)
   const pendingRemotePayloadRef = useRef<YoutubeSavePayload | null>(null)
+  const summaryPollTimersRef = useRef<Map<string, number>>(new Map())
+  const summaryPollFailureCountRef = useRef<Map<string, number>>(new Map())
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -135,6 +139,88 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
     saveYoutubeCategories(payload.categories)
     saveYoutubeSelectedCategoryId(payload.selectedCategoryId)
   }, [])
+
+  const toSummaryPatch = useCallback(
+    (
+      summary: Awaited<ReturnType<typeof summarizeYouTubeVideo>> | Awaited<ReturnType<typeof fetchYouTubeSummaryStatus>>,
+    ) => ({
+      summaryText: summary.summaryText,
+      summaryStatus: summary.summaryStatus,
+      summaryUpdatedAt: summary.summaryUpdatedAt,
+      summaryProvider: summary.summaryProvider,
+      summaryError: summary.summaryError,
+      notebookSourceStatus: summary.notebookSourceStatus,
+      notebookSourceId: summary.notebookSourceId,
+      notebookId: summary.notebookId,
+    }),
+    [],
+  )
+
+  const clearSummaryPolling = useCallback((videoId: string) => {
+    const timerId = summaryPollTimersRef.current.get(videoId)
+    if (typeof timerId === 'number') {
+      window.clearInterval(timerId)
+    }
+    summaryPollTimersRef.current.delete(videoId)
+    summaryPollFailureCountRef.current.delete(videoId)
+  }, [])
+
+  const startSummaryPolling = useCallback(
+    (videoId: string) => {
+      if (summaryPollTimersRef.current.has(videoId)) {
+        return
+      }
+
+      const pollSummaryStatus = async () => {
+        try {
+          const summary = await fetchYouTubeSummaryStatus(videoId)
+          summaryPollFailureCountRef.current.set(videoId, 0)
+          dispatch({
+            type: 'patchCard',
+            payload: {
+              videoId,
+              patch: toSummaryPatch(summary),
+            },
+          })
+
+          if (
+            summary.summaryStatus === 'ready' ||
+            summary.summaryStatus === 'failed' ||
+            summary.summaryJobStatus === 'failed' ||
+            summary.summaryJobStatus === 'dead' ||
+            summary.summaryJobStatus === 'succeeded'
+          ) {
+            clearSummaryPolling(videoId)
+          }
+        } catch (error) {
+          const failureCount = (summaryPollFailureCountRef.current.get(videoId) ?? 0) + 1
+          summaryPollFailureCountRef.current.set(videoId, failureCount)
+          if (failureCount >= 3) {
+            dispatch({
+              type: 'patchCard',
+              payload: {
+                videoId,
+                patch: {
+                  summaryStatus: 'failed',
+                  summaryProvider: 'glm',
+                  summaryError: error instanceof Error ? error.message : '요약 상태를 불러오지 못했습니다.',
+                  summaryUpdatedAt: new Date().toISOString(),
+                },
+              },
+            })
+            clearSummaryPolling(videoId)
+          }
+        }
+      }
+
+      const intervalId = window.setInterval(() => {
+        void pollSummaryStatus()
+      }, 2000)
+      summaryPollTimersRef.current.set(videoId, intervalId)
+      void pollSummaryStatus()
+    },
+    [clearSummaryPolling, toSummaryPatch],
+  )
 
   const flushRemoteSaveQueue = useCallback(async () => {
     if (saveInFlightRef.current || !pendingRemotePayloadRef.current) {
@@ -346,12 +432,38 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
   ])
 
   useEffect(() => {
+    const timerMap = summaryPollTimersRef.current
+    const failureMap = summaryPollFailureCountRef.current
+
     return () => {
       if (saveDebounceTimeoutRef.current !== null) {
         window.clearTimeout(saveDebounceTimeoutRef.current)
       }
+      for (const timerId of timerMap.values()) {
+        window.clearInterval(timerId)
+      }
+      timerMap.clear()
+      failureMap.clear()
     }
   }, [])
+
+  useEffect(() => {
+    const queuedIds = new Set(
+      state.cards
+        .filter((card) => card.summaryStatus === 'queued')
+        .map((card) => card.videoId),
+    )
+
+    for (const queuedVideoId of queuedIds) {
+      startSummaryPolling(queuedVideoId)
+    }
+
+    for (const videoId of Array.from(summaryPollTimersRef.current.keys())) {
+      if (!queuedIds.has(videoId)) {
+        clearSummaryPolling(videoId)
+      }
+    }
+  }, [clearSummaryPolling, startSummaryPolling, state.cards])
 
   useEffect(() => {
     if (!remoteEnabled || !remoteSyncDegraded || !hasLoadedRemote) {
@@ -487,6 +599,51 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
         },
       })
       dispatch({ type: 'setPage', payload: { page: 1 } })
+
+      dispatch({
+        type: 'patchCard',
+        payload: {
+          videoId: card.id,
+          patch: {
+            summaryStatus: 'queued',
+            summaryProvider: 'glm',
+            summaryError: null,
+          },
+        },
+      })
+
+      void summarizeYouTubeVideo(card.videoId)
+        .then((summary) => {
+          dispatch({
+            type: 'patchCard',
+            payload: {
+              videoId: card.id,
+              patch: toSummaryPatch(summary),
+            },
+          })
+
+          if (summary.summaryStatus === 'queued' || summary.summaryJobStatus === 'queued' || summary.summaryJobStatus === 'running') {
+            startSummaryPolling(card.videoId)
+          } else {
+            clearSummaryPolling(card.videoId)
+          }
+        })
+        .catch((error) => {
+          dispatch({
+            type: 'patchCard',
+            payload: {
+              videoId: card.id,
+              patch: {
+                summaryStatus: 'failed',
+                summaryProvider: 'glm',
+                summaryError: error instanceof Error ? error.message : '요약 생성에 실패했습니다.',
+                summaryUpdatedAt: new Date().toISOString(),
+              },
+            },
+          })
+          clearSummaryPolling(card.videoId)
+        })
+
       return true
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '영상 정보를 불러오지 못했습니다.')
@@ -508,6 +665,7 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
     }
 
     dispatch({ type: 'removeCard', payload: { videoId } })
+    clearSummaryPolling(videoId)
   }
 
   const handleCreateCategory = (input: string): boolean => {
@@ -585,6 +743,51 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
         targetCategoryId,
       },
     })
+  }
+
+  const handleRetrySummary = (videoId: string) => {
+    dispatch({
+      type: 'patchCard',
+      payload: {
+        videoId,
+        patch: {
+          summaryStatus: 'queued',
+          summaryProvider: 'glm',
+          summaryError: null,
+        },
+      },
+    })
+
+    void summarizeYouTubeVideo(videoId, { force: true })
+      .then((summary) => {
+        dispatch({
+          type: 'patchCard',
+          payload: {
+            videoId,
+            patch: toSummaryPatch(summary),
+          },
+        })
+        if (summary.summaryStatus === 'queued' || summary.summaryJobStatus === 'queued' || summary.summaryJobStatus === 'running') {
+          startSummaryPolling(videoId)
+        } else {
+          clearSummaryPolling(videoId)
+        }
+      })
+      .catch((error) => {
+        dispatch({
+          type: 'patchCard',
+          payload: {
+            videoId,
+            patch: {
+              summaryStatus: 'failed',
+              summaryProvider: 'glm',
+              summaryError: error instanceof Error ? error.message : '요약 생성에 실패했습니다.',
+              summaryUpdatedAt: new Date().toISOString(),
+            },
+          },
+        })
+        clearSummaryPolling(videoId)
+      })
   }
 
   return (
@@ -695,6 +898,7 @@ export const YoutubeFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChan
                   categories={state.categories}
                   onDelete={handleDeleteCard}
                   onMove={handleMoveCard}
+                  onRetrySummary={handleRetrySummary}
                 />
               ))}
             </div>

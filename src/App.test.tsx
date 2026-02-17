@@ -8,26 +8,71 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
+  regenerateGithubSummary: vi.fn().mockResolvedValue({
+    jobId: 1,
+    summaryJobStatus: 'queued',
+    summaryText: 'React summary text',
+    summaryStatus: 'queued',
+    summaryUpdatedAt: null,
+    summaryProvider: 'none',
+    summaryError: null,
+  }),
+  fetchGithubSummaryStatus: vi.fn().mockResolvedValue({
+    jobId: 1,
+    summaryJobStatus: 'succeeded',
+    summaryText: 'React summary text',
+    summaryStatus: 'ready',
+    summaryUpdatedAt: '2026-02-16T00:00:00.000Z',
+    summaryProvider: 'glm',
+    summaryError: null,
+  }),
 }))
 
 vi.mock('@features/youtube/services/youtube', () => ({
   parseYouTubeVideoUrl: vi.fn(),
   fetchYouTubeVideo: vi.fn(),
+  summarizeYouTubeVideo: vi.fn().mockResolvedValue({
+    summaryText: '요약',
+    summaryStatus: 'ready',
+    summaryUpdatedAt: '2026-02-15T00:00:00.000Z',
+    summaryProvider: 'glm',
+    summaryError: null,
+    notebookSourceStatus: 'disabled',
+    notebookSourceId: null,
+    notebookId: null,
+  }),
   buildYouTubeSummary: vi.fn((value: string) => value),
 }))
 
 vi.mock('@features/bookmark/services/bookmark', () => ({
   parseBookmarkUrl: vi.fn(),
   fetchBookmarkMetadata: vi.fn(),
+  regenerateBookmarkSummary: vi.fn(),
+  fetchBookmarkSummaryStatus: vi.fn(),
   createBookmarkCardFromDraft: vi.fn(
     (
       draft: Omit<
         BookmarkCard,
-        'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+        | 'categoryId'
+        | 'summaryText'
+        | 'summaryStatus'
+        | 'summaryProvider'
+        | 'summaryUpdatedAt'
+        | 'summaryError'
+        | 'addedAt'
+        | 'linkStatus'
+        | 'lastCheckedAt'
+        | 'lastStatusCode'
+        | 'lastResolvedUrl'
       >,
     ) => ({
     ...draft,
     categoryId: 'main',
+    summaryText: '',
+    summaryStatus: 'idle',
+    summaryProvider: 'none',
+    summaryUpdatedAt: null,
+    summaryError: null,
     addedAt: '2026-02-15T00:00:00.000Z',
     linkStatus: 'unknown',
     lastCheckedAt: null,
@@ -56,7 +101,9 @@ vi.mock('@core/data/adapters/remoteDb', () => ({
   importUnifiedBackup: vi.fn().mockResolvedValue(undefined),
 }))
 
-const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')
+const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha, regenerateGithubSummary } = await import(
+  '@features/github/services/github'
+)
 const { parseYouTubeVideoUrl, fetchYouTubeVideo } = await import('@features/youtube/services/youtube')
 const { parseBookmarkUrl, fetchBookmarkMetadata } = await import('@features/bookmark/services/bookmark')
 const {
@@ -126,13 +173,31 @@ const mockYoutubeCard: YouTubeVideoCard = {
   publishedAt: '2026-02-15T00:00:00.000Z',
   viewCount: 100,
   likeCount: 5,
+  summaryText: '',
+  summaryStatus: 'idle',
+  summaryUpdatedAt: null,
+  summaryProvider: 'none',
+  summaryError: null,
+  notebookSourceStatus: 'disabled',
+  notebookSourceId: null,
+  notebookId: null,
   addedAt: '2026-02-15T00:00:00.000Z',
   updatedAt: '2026-02-15T00:00:00.000Z',
 }
 
 const mockBookmarkDraft: Omit<
   BookmarkCard,
-  'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+  | 'categoryId'
+  | 'summaryText'
+  | 'summaryStatus'
+  | 'summaryProvider'
+  | 'summaryUpdatedAt'
+  | 'summaryError'
+  | 'addedAt'
+  | 'linkStatus'
+  | 'lastCheckedAt'
+  | 'lastStatusCode'
+  | 'lastResolvedUrl'
 > = {
   id: 'https://openai.com/research',
   url: 'https://openai.com/research',
@@ -311,6 +376,31 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /추가|조회 중\.\.\./ })).toBeDisabled()
   })
 
+  it('recovers github board automatically after transient startup connection failure', async () => {
+    vi.mocked(isRemoteSnapshotEnabled).mockReturnValue(true)
+    vi.mocked(loadGithubDashboardFromRemote)
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue({
+        cards: [mockReactCard],
+        notesByRepo: {},
+        categories: [
+          { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        selectedCategoryId: 'main',
+        revision: 1,
+      })
+
+    render(<App />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/원격 DB 연결 준비 중입니다\. 서버 준비가 완료되면 자동으로 복구됩니다\./)).toBeInTheDocument(),
+    )
+
+    await waitFor(() => expect(screen.getByText('react')).toBeInTheDocument(), { timeout: 5000 })
+    expect(screen.getByRole('button', { name: '추가' })).toBeEnabled()
+  })
+
   it('restores selected top section from storage', async () => {
     window.localStorage.setItem(TOP_SECTION_STORAGE_KEY, 'bookmark')
 
@@ -331,7 +421,7 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
 
     await screen.findByText('react')
-    expect(screen.getByText('React summary text')).toBeInTheDocument()
+    expect(screen.getAllByText('React summary text').length).toBeGreaterThan(0)
 
     fireEvent.change(input, { target: { value: 'facebook/react' } })
     fireEvent.click(screen.getByRole('button', { name: '추가' }))
@@ -342,6 +432,28 @@ describe('App', () => {
       const cards = JSON.parse(window.localStorage.getItem('github_cards_v1') ?? '[]') as GitHubRepoCard[]
       expect(cards).toHaveLength(1)
     })
+  })
+
+  it('shows global warning banner when summary regeneration fails', async () => {
+    vi.mocked(fetchRepo).mockResolvedValue(mockReactCard)
+    vi.mocked(regenerateGithubSummary).mockRejectedValueOnce(
+      new Error('요약 API 경로를 찾지 못했습니다. 서버를 최신 버전으로 재기동해 주세요.'),
+    )
+
+    render(<App />)
+
+    const input = await screen.findByLabelText('GitHub 저장소 URL')
+    fireEvent.change(input, { target: { value: 'facebook/react' } })
+    fireEvent.click(screen.getByRole('button', { name: '추가' }))
+    await screen.findByText('react')
+
+    fireEvent.click(screen.getByRole('button', { name: '요약 재생성' }))
+
+    expect(
+      await screen.findByText(
+        '요약 재생성 실패: 요약 API 경로를 찾지 못했습니다. 서버를 최신 버전으로 재기동해 주세요.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('filters registered cards in real time and searches across all categories in main', async () => {

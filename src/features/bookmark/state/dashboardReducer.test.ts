@@ -11,6 +11,11 @@ const baseCard = (overrides: Partial<BookmarkCard> = {}): BookmarkCard => ({
   domain: 'example.com',
   title: 'Example',
   excerpt: 'Excerpt',
+  summaryText: '',
+  summaryStatus: 'idle',
+  summaryProvider: 'none',
+  summaryUpdatedAt: null,
+  summaryError: null,
   thumbnailUrl: null,
   faviconUrl: null,
   tags: [],
@@ -94,6 +99,29 @@ describe('bookmark dashboardReducer', () => {
     expect(next.cards[0].linkStatus).toBe('redirected')
     expect(next.cards[0].lastStatusCode).toBe(301)
     expect(next.cards[0].lastResolvedUrl).toBe('https://example.com/a?ref=canonical')
+  })
+
+  it('patches bookmark summary fields', () => {
+    let state = initialState()
+    state = dashboardReducer(state, { type: 'addCard', payload: baseCard() })
+
+    const next = dashboardReducer(state, {
+      type: 'patchCardSummary',
+      payload: {
+        normalizedUrl: 'https://example.com/a',
+        patch: {
+          summaryText: '요약 결과',
+          summaryStatus: 'ready',
+          summaryProvider: 'glm',
+          summaryUpdatedAt: '2026-02-17T10:00:00.000Z',
+          summaryError: null,
+        },
+      },
+    })
+
+    expect(next.cards[0].summaryText).toBe('요약 결과')
+    expect(next.cards[0].summaryStatus).toBe('ready')
+    expect(next.cards[0].summaryProvider).toBe('glm')
   })
 
   it('deletes custom category and moves its cards to warehouse', () => {

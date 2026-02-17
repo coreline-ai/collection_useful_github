@@ -13,7 +13,47 @@ type YouTubeVideoResponse = {
   likeCount: number | null
   url: string
   updatedAt?: string
+  summaryText?: string
+  summaryStatus?: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryUpdatedAt?: string | null
+  summaryProvider?: 'glm' | 'none'
+  summaryError?: string | null
+  notebookSourceStatus?: 'disabled' | 'queued' | 'linked' | 'failed'
+  notebookSourceId?: string | null
+  notebookId?: string | null
 }
+
+type YouTubeSummarizeResponse = {
+  ok: boolean
+  jobId?: number | null
+  summaryJobStatus?: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
+  summaryText?: string
+  summaryStatus?: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryUpdatedAt?: string | null
+  summaryProvider?: 'glm' | 'none'
+  summaryError?: string | null
+  notebookSourceStatus?: 'disabled' | 'queued' | 'linked' | 'failed'
+  notebookSourceId?: string | null
+  notebookId?: string | null
+  message?: string
+}
+
+type YouTubeSummaryStateFields = Pick<
+  YouTubeVideoCard,
+  | 'summaryText'
+  | 'summaryStatus'
+  | 'summaryUpdatedAt'
+  | 'summaryProvider'
+  | 'summaryError'
+  | 'notebookSourceStatus'
+  | 'notebookSourceId'
+  | 'notebookId'
+>
+
+type YouTubeSummaryApiResult = {
+  jobId: number | null
+  summaryJobStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead'
+} & YouTubeSummaryStateFields
 
 export const parseYouTubeVideoUrl = (input: string): { videoId: string } | null => {
   const raw = input.trim()
@@ -93,6 +133,46 @@ const parseErrorMessage = async (response: Response): Promise<string> => {
   return payload.message ? `YouTube API 오류: ${payload.message}` : `YouTube API 요청 실패 (${response.status})`
 }
 
+const toSummaryStatus = (
+  value: unknown,
+  summaryText: string,
+): YouTubeVideoCard['summaryStatus'] => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return summaryText ? 'ready' : 'idle'
+}
+
+const toSummaryProvider = (value: unknown): YouTubeVideoCard['summaryProvider'] => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const toNotebookSourceStatus = (value: unknown): YouTubeVideoCard['notebookSourceStatus'] => {
+  if (value === 'queued' || value === 'linked' || value === 'failed') {
+    return value
+  }
+
+  return 'disabled'
+}
+
+export const resolveYouTubeSummaryFields = (
+  source: Partial<YouTubeVideoCard> & Record<string, unknown>,
+): YouTubeSummaryStateFields => {
+  const summaryText = typeof source.summaryText === 'string' ? source.summaryText : ''
+
+  return {
+    summaryText,
+    summaryStatus: toSummaryStatus(source.summaryStatus, summaryText.trim()),
+    summaryUpdatedAt: source.summaryUpdatedAt ? String(source.summaryUpdatedAt) : null,
+    summaryProvider: toSummaryProvider(source.summaryProvider),
+    summaryError: source.summaryError ? String(source.summaryError) : null,
+    notebookSourceStatus: toNotebookSourceStatus(source.notebookSourceStatus),
+    notebookSourceId: source.notebookSourceId ? String(source.notebookSourceId) : null,
+    notebookId: source.notebookId ? String(source.notebookId) : null,
+  }
+}
+
 export const fetchYouTubeVideo = async (videoId: string): Promise<YouTubeVideoCard> => {
   const remoteBaseUrl = getRemoteBaseUrl()
 
@@ -113,6 +193,7 @@ export const fetchYouTubeVideo = async (videoId: string): Promise<YouTubeVideoCa
   }
 
   const now = new Date().toISOString()
+  const summaryFields = resolveYouTubeSummaryFields(payload.video)
   return {
     id: payload.video.videoId,
     videoId: payload.video.videoId,
@@ -128,7 +209,89 @@ export const fetchYouTubeVideo = async (videoId: string): Promise<YouTubeVideoCa
       typeof payload.video.likeCount === 'number' && Number.isFinite(payload.video.likeCount)
         ? payload.video.likeCount
         : null,
+    ...summaryFields,
     addedAt: now,
     updatedAt: payload.video.updatedAt ?? payload.video.publishedAt ?? now,
+  }
+}
+
+export const summarizeYouTubeVideo = async (
+  videoId: string,
+  options: { force?: boolean } = {},
+): Promise<YouTubeSummaryApiResult> => {
+  const remoteBaseUrl = getRemoteBaseUrl()
+
+  if (!remoteBaseUrl) {
+    throw new Error('원격 DB API가 설정되지 않았습니다. VITE_POSTGRES_SYNC_API_BASE_URL을 확인해 주세요.')
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${remoteBaseUrl}/api/youtube/videos/${encodeURIComponent(videoId)}/summarize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        force: Boolean(options.force),
+      }),
+    })
+  } catch (error) {
+    const message =
+      error instanceof Error && error.name === 'AbortError'
+        ? '요약 API 요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.'
+        : '요약 API 연결에 실패했습니다. 서버 상태와 CORS 설정을 확인해 주세요.'
+    throw new Error(message)
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as YouTubeSummarizeResponse
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || `YouTube 요약 생성 요청 실패 (${response.status})`)
+  }
+
+  return {
+    jobId: typeof payload.jobId === 'number' ? payload.jobId : null,
+    summaryJobStatus:
+      payload.summaryJobStatus === 'queued' ||
+      payload.summaryJobStatus === 'running' ||
+      payload.summaryJobStatus === 'succeeded' ||
+      payload.summaryJobStatus === 'failed' ||
+      payload.summaryJobStatus === 'dead'
+        ? payload.summaryJobStatus
+        : 'idle',
+    ...resolveYouTubeSummaryFields(payload),
+  }
+}
+
+export const fetchYouTubeSummaryStatus = async (
+  videoId: string,
+): Promise<YouTubeSummaryApiResult> => {
+  const remoteBaseUrl = getRemoteBaseUrl()
+
+  if (!remoteBaseUrl) {
+    throw new Error('원격 DB API가 설정되지 않았습니다. VITE_POSTGRES_SYNC_API_BASE_URL을 확인해 주세요.')
+  }
+
+  const response = await fetch(
+    `${remoteBaseUrl}/api/youtube/summaries/${encodeURIComponent(videoId)}/status`,
+  )
+  const payload = (await response.json().catch(() => ({}))) as YouTubeSummarizeResponse
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.message || `YouTube 요약 상태 조회 실패 (${response.status})`)
+  }
+
+  return {
+    jobId: typeof payload.jobId === 'number' ? payload.jobId : null,
+    summaryJobStatus:
+      payload.summaryJobStatus === 'queued' ||
+      payload.summaryJobStatus === 'running' ||
+      payload.summaryJobStatus === 'succeeded' ||
+      payload.summaryJobStatus === 'failed' ||
+      payload.summaryJobStatus === 'dead'
+        ? payload.summaryJobStatus
+        : 'idle',
+    ...resolveYouTubeSummaryFields(payload),
   }
 }

@@ -35,7 +35,15 @@ GitHub, YouTube, Bookmark를 카드보드로 관리하고, PostgreSQL 통합 인
 ### 2.2 YouTube 보드
 
 - 영상 URL(`watch`, `youtu.be`, `shorts`)로 카드 추가
-- 카드: 썸네일, 제목, 채널, 조회수, 게시일, 링크
+- 카드: 썸네일, 제목, 채널, 조회수, 게시일, 링크, 요약 상태/요약 텍스트
+- 요약 생성:
+  - 카드 추가 직후 비동기 요약 생성 요청
+  - 기본 엔진: GLM (`YOUTUBE_SUMMARY_PROVIDER=glm`)
+  - 실패 시 카드는 유지되고 요약만 `실패` 상태 표시 + `요약 재생성` 가능
+- NotebookLM 소스 연동 상태:
+  - `NOTEBOOKLM_ENABLED=true`일 때 실제 NotebookLM REST(`sources list/create`) 호출
+  - 기본 `disabled` (호출 없이 안전 스킵)
+  - 권한/토큰 실패 시 카드 저장은 유지되고 source 상태만 `failed`
 - 상세 모달 없음(카드에서 바로 링크 이동)
 - GitHub와 동일한 보드 UX(카테고리/검색/페이지네이션/이동/삭제)
 
@@ -234,6 +242,7 @@ server/
 ### YouTube
 
 - `GET /api/youtube/videos/:videoId`
+- `POST /api/youtube/videos/:videoId/summarize`
 - `GET /api/youtube/dashboard`
 - `PUT /api/youtube/dashboard`
 
@@ -323,6 +332,18 @@ npm run dev:all
 | `CORS_ORIGIN` | `http://localhost:5173,http://localhost:5174` | 허용 Origin |
 | `YOUTUBE_API_KEY` | - | YouTube Data API 키 |
 | `YOUTUBE_API_TIMEOUT_SECONDS` | `12` | YouTube API 타임아웃 |
+| `YOUTUBE_SUMMARY_ENABLED` | `true` | YouTube 요약 생성 활성화 |
+| `YOUTUBE_SUMMARY_PROVIDER` | `glm` | 요약 엔진 선택(`glm`) |
+| `YOUTUBE_SUMMARY_TIMEOUT_SECONDS` | `30` | 요약 생성 타임아웃(초) |
+| `NOTEBOOKLM_ENABLED` | `false` | NotebookLM source 동기화 활성화 |
+| `NOTEBOOKLM_PROJECT_ID` | - | NotebookLM 프로젝트 ID |
+| `NOTEBOOKLM_LOCATION` | `global` | NotebookLM 리전 |
+| `NOTEBOOKLM_ENDPOINT_LOCATION` | `global` | NotebookLM API endpoint 위치 (`global/us/eu`) |
+| `NOTEBOOKLM_NOTEBOOK_ID` | - | NotebookLM 노트북 ID |
+| `NOTEBOOKLM_SERVICE_ACCOUNT_JSON` | - | 서비스 계정 JSON 문자열/파일경로/base64(JSON) |
+| `GLM_API_KEY` | - | GLM 요약 API 키 |
+| `GLM_BASE_URL` | `https://api.z.ai/api/coding/paas/v4` | GLM Base URL |
+| `GLM_MODEL` | `glm-4.7` | GLM 모델 |
 | `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 fetch 타임아웃 |
 | `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 북마크 HTML 최대 바이트 |
 

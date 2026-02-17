@@ -7,6 +7,8 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
+  regenerateGithubSummary: vi.fn(),
+  fetchGithubSummaryStatus: vi.fn(),
 }))
 
 const { fetchRepo, fetchRepoDetail, fetchLatestCommitSha } = await import('@features/github/services/github')

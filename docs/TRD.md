@@ -180,12 +180,25 @@ rate limit:
 엔드포인트:
 
 - `GET /api/youtube/videos/:videoId`
+- `POST /api/youtube/videos/:videoId/summarize`
 
 동작:
 
 - YouTube Data API v3 `videos?part=snippet,statistics`
 - quota/timeout/not found 메시지 분기
 - `thumbnail`, `viewCount`, `likeCount` 매핑
+- 요약 파이프라인:
+  - 입력: `title + channelTitle + description + publishedAt + viewCount`
+  - 엔진: GLM (`YOUTUBE_SUMMARY_PROVIDER=glm`)
+  - 결과: 한국어 3문장/220자 이내 정제
+  - 재시도: 실패 시 1회 백오프 재시도
+  - 저장: `unified_items.summary` + `raw.card.summary*` 필드 동시 반영
+- NotebookLM:
+  - `NOTEBOOKLM_ENABLED=false` 기본
+  - `true`일 때 NotebookLM REST(`sources list / batchCreate`) 실제 호출
+  - 인증: 서비스 계정(JSON 문자열/파일 경로/base64 JSON) 또는 ADC
+  - endpoint: `${NOTEBOOKLM_ENDPOINT_LOCATION}-discoveryengine.googleapis.com`
+  - 실패 시 source 상태만 `failed`, 카드 저장/요약 흐름은 유지
 
 ## 8. 번역 설계
 

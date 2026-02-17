@@ -68,6 +68,18 @@ const migrateCards = (cards: BookmarkCard[], categories: Category[]): BookmarkCa
     ...card,
     normalizedUrl: String(card.normalizedUrl || card.id),
     categoryId: validCategoryIds.has(card.categoryId) ? card.categoryId : DEFAULT_MAIN_CATEGORY_ID,
+    summaryText: typeof card.summaryText === 'string' ? card.summaryText : '',
+    summaryStatus:
+      card.summaryStatus === 'queued' ||
+      card.summaryStatus === 'ready' ||
+      card.summaryStatus === 'failed'
+        ? card.summaryStatus
+        : typeof card.summaryText === 'string' && card.summaryText.trim()
+          ? 'ready'
+          : 'idle',
+    summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+    summaryUpdatedAt: card.summaryUpdatedAt ?? null,
+    summaryError: card.summaryError ?? null,
     linkStatus: card.linkStatus ?? 'unknown',
     lastCheckedAt: card.lastCheckedAt ?? null,
     lastStatusCode: card.lastStatusCode ?? null,
@@ -99,6 +111,16 @@ type BookmarkDashboardAction =
         lastCheckedAt: string | null
         lastStatusCode: number | null
         lastResolvedUrl: string | null
+      }
+    }
+  | {
+      type: 'patchCardSummary'
+      payload: {
+        normalizedUrl: string
+        patch: Pick<
+          BookmarkCard,
+          'summaryText' | 'summaryStatus' | 'summaryProvider' | 'summaryUpdatedAt' | 'summaryError'
+        >
       }
     }
   | {
@@ -252,6 +274,24 @@ export const dashboardReducer = (
                 lastCheckedAt: action.payload.lastCheckedAt,
                 lastStatusCode: action.payload.lastStatusCode,
                 lastResolvedUrl: action.payload.lastResolvedUrl,
+              }
+            : card,
+        ),
+      }
+    }
+    case 'patchCardSummary': {
+      const hasTarget = state.cards.some((card) => card.normalizedUrl === action.payload.normalizedUrl)
+      if (!hasTarget) {
+        return state
+      }
+
+      return {
+        ...state,
+        cards: state.cards.map((card) =>
+          card.normalizedUrl === action.payload.normalizedUrl
+            ? {
+                ...card,
+                ...action.payload.patch,
               }
             : card,
         ),

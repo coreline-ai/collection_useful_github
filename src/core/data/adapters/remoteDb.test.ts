@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   checkBookmarkLinkStatus,
   fetchBookmarkMetadata,
+  fetchBookmarkSummaryStatus,
   isRemoteSnapshotEnabled,
   loadBookmarkDashboardFromRemote,
   loadGithubDashboardFromRemote,
   loadYoutubeDashboardFromRemote,
+  regenerateBookmarkSummary,
   saveBookmarkDashboardToRemote,
   saveGithubDashboardToRemote,
   saveYoutubeDashboardToRemote,
@@ -209,6 +211,53 @@ describe('remoteDb adapter', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/bookmark/link-check?url=')
     expect(result.status).toBe('ok')
     expect(result.statusCode).toBe(200)
+  })
+
+  it('requests bookmark summary regeneration', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        jobId: 12,
+        summaryJobStatus: 'queued',
+        summaryText: '',
+        summaryStatus: 'queued',
+        summaryUpdatedAt: null,
+        summaryProvider: 'none',
+        summaryError: null,
+      }),
+    )
+
+    const result = await regenerateBookmarkSummary('https://example.com/post', { force: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/bookmark/summaries/regenerate')
+    expect(result.summaryStatus).toBe('queued')
+  })
+
+  it('fetches bookmark summary status', async () => {
+    vi.stubEnv('VITE_POSTGRES_SYNC_API_BASE_URL', 'http://localhost:4000')
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      asResponse(200, {
+        ok: true,
+        jobId: 12,
+        summaryJobStatus: 'succeeded',
+        summaryText: '요약',
+        summaryStatus: 'ready',
+        summaryUpdatedAt: '2026-02-17T10:00:00.000Z',
+        summaryProvider: 'glm',
+        summaryError: null,
+      }),
+    )
+
+    const result = await fetchBookmarkSummaryStatus('https://example.com/post')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/bookmark/summaries/status?bookmarkId=')
+    expect(result.summaryStatus).toBe('ready')
+    expect(result.summaryText).toBe('요약')
   })
 
   it('forwards relevance search options to api query params', async () => {

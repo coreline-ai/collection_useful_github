@@ -69,6 +69,17 @@ const migrateCards = (cards: GitHubRepoCard[], categories: Category[]): GitHubRe
   return cards.map((card) => ({
     ...card,
     categoryId: validCategoryIds.has(card.categoryId) ? card.categoryId : DEFAULT_MAIN_CATEGORY_ID,
+    summaryStatus:
+      card.summaryStatus === 'queued' ||
+      card.summaryStatus === 'ready' ||
+      card.summaryStatus === 'failed'
+        ? card.summaryStatus
+        : String(card.summary || '').trim()
+          ? 'ready'
+          : 'idle',
+    summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+    summaryUpdatedAt: card.summaryUpdatedAt || null,
+    summaryError: card.summaryError || null,
   }))
 }
 
@@ -103,6 +114,10 @@ const DEV_DUMMY_CARD: GitHubRepoCard = {
   createdAt: '2022-11-10T00:00:00.000Z',
   updatedAt: new Date().toISOString(),
   addedAt: new Date().toISOString(),
+  summaryStatus: 'ready',
+  summaryProvider: 'none',
+  summaryUpdatedAt: null,
+  summaryError: null,
 }
 
 const getInitialCards = (useLocalCache: boolean): GitHubRepoCard[] => {
@@ -135,6 +150,18 @@ type DashboardAction =
   | { type: 'renameCategory'; payload: { categoryId: CategoryId; name: string } }
   | { type: 'deleteCategory'; payload: { categoryId: CategoryId } }
   | { type: 'moveCardToCategory'; payload: { repoId: string; targetCategoryId: CategoryId } }
+  | {
+      type: 'patchCardSummary'
+      payload: {
+        repoId: string
+        patch: Partial<
+          Pick<
+            GitHubRepoCard,
+            'summary' | 'summaryStatus' | 'summaryProvider' | 'summaryUpdatedAt' | 'summaryError'
+          >
+        >
+      }
+    }
   | { type: 'hydrateCategories'; payload: { categories: Category[]; selectedCategoryId: CategoryId } }
   | {
       type: 'hydrateDashboard'
@@ -314,6 +341,25 @@ export const dashboardReducer = (state: DashboardState, action: DashboardAction)
       return {
         ...state,
         cards,
+      }
+    }
+    case 'patchCardSummary': {
+      if (!state.cards.some((card) => card.id === action.payload.repoId)) {
+        return state
+      }
+
+      return {
+        ...state,
+        cards: state.cards.map((card) => {
+          if (card.id !== action.payload.repoId) {
+            return card
+          }
+
+          return {
+            ...card,
+            ...action.payload.patch,
+          }
+        }),
       }
     }
     case 'hydrateCategories': {

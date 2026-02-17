@@ -66,8 +66,28 @@ const migrateCards = (cards: YouTubeVideoCard[], categories: Category[]): YouTub
 
   return cards.map((card) => ({
     ...card,
+    summaryText: typeof card.summaryText === 'string' ? card.summaryText : '',
+    summaryStatus:
+      card.summaryStatus === 'queued' ||
+      card.summaryStatus === 'ready' ||
+      card.summaryStatus === 'failed'
+        ? card.summaryStatus
+        : typeof card.summaryText === 'string' && card.summaryText.trim()
+          ? 'ready'
+          : 'idle',
     videoId: card.videoId || card.id,
     categoryId: validCategoryIds.has(card.categoryId) ? card.categoryId : DEFAULT_MAIN_CATEGORY_ID,
+    summaryUpdatedAt: card.summaryUpdatedAt || null,
+    summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+    summaryError: card.summaryError || null,
+    notebookSourceStatus:
+      card.notebookSourceStatus === 'queued' ||
+      card.notebookSourceStatus === 'linked' ||
+      card.notebookSourceStatus === 'failed'
+        ? card.notebookSourceStatus
+        : 'disabled',
+    notebookSourceId: card.notebookSourceId || null,
+    notebookId: card.notebookId || null,
   }))
 }
 
@@ -87,6 +107,7 @@ type YouTubeDashboardAction =
   | { type: 'renameCategory'; payload: { categoryId: CategoryId; name: string } }
   | { type: 'deleteCategory'; payload: { categoryId: CategoryId } }
   | { type: 'moveCardToCategory'; payload: { videoId: string; targetCategoryId: CategoryId } }
+  | { type: 'patchCard'; payload: { videoId: string; patch: Partial<YouTubeVideoCard> } }
   | {
       type: 'hydrateDashboard'
       payload: YouTubeDashboardSnapshot
@@ -223,6 +244,19 @@ export const dashboardReducer = (
       return {
         ...state,
         cards,
+      }
+    }
+    case 'patchCard': {
+      const hasTarget = state.cards.some((card) => card.id === action.payload.videoId)
+      if (!hasTarget) {
+        return state
+      }
+
+      return {
+        ...state,
+        cards: state.cards.map((card) =>
+          card.id === action.payload.videoId ? { ...card, ...action.payload.patch } : card,
+        ),
       }
     }
     case 'hydrateDashboard': {

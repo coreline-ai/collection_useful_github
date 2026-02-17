@@ -10,12 +10,17 @@ import { RepoCard } from '@features/github/ui/RepoCard'
 import { RepoDetailModal } from '@features/github/ui/RepoDetailModal'
 import { RepoInputForm } from '@features/github/ui/RepoInputForm'
 import { RepoSearchForm } from '@features/github/ui/RepoSearchForm'
-import { fetchRepo } from '@features/github/services/github'
+import {
+  fetchGithubSummaryStatus,
+  fetchRepo,
+  regenerateGithubSummary,
+} from '@features/github/services/github'
 import { dashboardReducer, initialState } from '@features/github/state/dashboardReducer'
 import {
   CARDS_PER_PAGE,
   CATEGORY_NAME_MAX_LENGTH,
   DEFAULT_MAIN_CATEGORY_ID,
+  REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK,
   REMOTE_SYNC_RECOVERED_BADGE_MS,
   REMOTE_SYNC_RECOVERY_INTERVAL_MS,
   REMOTE_SYNC_SAVE_DEBOUNCE_MS,
@@ -32,13 +37,14 @@ import type {
   Category,
   CategoryId,
   GitHubDashboardSnapshot,
+  GitHubRepoCard,
   RepoNote,
   SyncConnectionStatus,
   ThemeMode,
 } from '@shared/types'
 import { pageCount, paginate } from '@utils/paginate'
 import { parseGitHubRepoUrl } from '@utils/parseGitHubRepoUrl'
-import { isRemoteSyncConnectionWarning } from '@utils/remoteSync'
+import { isRemoteSyncConnectionWarning, isTransientRemoteSyncError } from '@utils/remoteSync'
 
 type GithubFeatureEntryProps = {
   themeMode: ThemeMode
@@ -80,6 +86,9 @@ const hasDuplicateCategoryName = (
   })
 }
 
+const GITHUB_SUMMARY_POLL_INTERVAL_MS = 2000
+const GITHUB_SUMMARY_MAX_FAILURES = 3
+
 export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChange }: GithubFeatureEntryProps) => {
   type GithubSavePayload = Pick<
     GitHubDashboardSnapshot,
@@ -98,9 +107,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   const [hasRemoteBaseline, setHasRemoteBaseline] = useState(!remoteEnabled)
   const [remoteSyncDegraded, setRemoteSyncDegraded] = useState(false)
   const transientRemoteSaveFailuresRef = useRef(0)
+  const transientRemoteLoadFailuresRef = useRef(0)
   const [syncStatus, setSyncStatus] = useState<SyncConnectionStatus>('healthy')
   const [lastSyncSuccessAt, setLastSyncSuccessAt] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [globalWarningMessage, setGlobalWarningMessage] = useState<string | null>(null)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
   const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
@@ -110,6 +121,9 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   const saveDebounceTimeoutRef = useRef<number | null>(null)
   const saveInFlightRef = useRef(false)
   const pendingRemotePayloadRef = useRef<GithubSavePayload | null>(null)
+  const summaryPollTimersRef = useRef<Map<string, number>>(new Map())
+  const summaryPollFailureCountRef = useRef<Map<string, number>>(new Map())
+  const cardsRef = useRef(state.cards)
 
   const selectedCategory = useMemo(
     () => state.categories.find((category) => category.id === state.selectedCategoryId) ?? null,
@@ -169,6 +183,11 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
 
   const readOnlyMode = remoteEnabled && (!hasRemoteBaseline || remoteSyncDegraded || hydrating)
   const readOnlyMessage = '원격 DB 연결 문제로 현재 GitHub 보드는 읽기 전용입니다. 연결 복구 후 다시 시도해 주세요.'
+  const startupRetryMessage = '원격 DB 연결 준비 중입니다. 서버 준비가 완료되면 자동으로 복구됩니다.'
+
+  useEffect(() => {
+    cardsRef.current = state.cards
+  }, [state.cards])
 
   const persistLocalSnapshot = useCallback((payload: GithubSavePayload) => {
     if (remoteEnabled) {
@@ -180,6 +199,106 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     saveCategories(payload.categories)
     saveSelectedCategoryId(payload.selectedCategoryId)
   }, [remoteEnabled])
+
+  const clearSummaryPolling = useCallback((repoId: string) => {
+    const timerId = summaryPollTimersRef.current.get(repoId)
+    if (typeof timerId === 'number') {
+      window.clearInterval(timerId)
+    }
+
+    summaryPollTimersRef.current.delete(repoId)
+    summaryPollFailureCountRef.current.delete(repoId)
+  }, [])
+
+  const startSummaryPolling = useCallback(
+    (repoId: string) => {
+      if (summaryPollTimersRef.current.has(repoId)) {
+        return
+      }
+
+      const pollSummaryStatus = async () => {
+        try {
+          const summary = await fetchGithubSummaryStatus(repoId)
+          summaryPollFailureCountRef.current.set(repoId, 0)
+          const currentCard = cardsRef.current.find((card) => card.id === repoId)
+          if (!currentCard) {
+            clearSummaryPolling(repoId)
+            return
+          }
+
+          const patch: Partial<
+            Pick<
+              GitHubRepoCard,
+              'summary' | 'summaryStatus' | 'summaryProvider' | 'summaryUpdatedAt' | 'summaryError'
+            >
+          > = {
+            summaryStatus: summary.summaryStatus,
+            summaryProvider: summary.summaryProvider,
+            summaryUpdatedAt: summary.summaryUpdatedAt,
+            summaryError: summary.summaryError,
+          }
+
+          if (summary.summaryText && summary.summaryText.trim()) {
+            patch.summary = summary.summaryText
+          }
+
+          const hasSummaryChanged =
+            (typeof patch.summary === 'string' && patch.summary !== currentCard.summary) ||
+            patch.summaryStatus !== currentCard.summaryStatus ||
+            patch.summaryProvider !== currentCard.summaryProvider ||
+            (patch.summaryUpdatedAt ?? null) !== (currentCard.summaryUpdatedAt ?? null) ||
+            (patch.summaryError ?? null) !== (currentCard.summaryError ?? null)
+
+          if (hasSummaryChanged) {
+            dispatch({
+              type: 'patchCardSummary',
+              payload: {
+                repoId,
+                patch,
+              },
+            })
+          }
+
+          if (
+            summary.summaryStatus === 'ready' ||
+            summary.summaryStatus === 'failed' ||
+            summary.summaryJobStatus === 'succeeded' ||
+            summary.summaryJobStatus === 'failed' ||
+            summary.summaryJobStatus === 'dead'
+          ) {
+            clearSummaryPolling(repoId)
+          }
+        } catch (error) {
+          const failureCount = (summaryPollFailureCountRef.current.get(repoId) ?? 0) + 1
+          summaryPollFailureCountRef.current.set(repoId, failureCount)
+
+          if (failureCount >= GITHUB_SUMMARY_MAX_FAILURES) {
+            dispatch({
+              type: 'patchCardSummary',
+              payload: {
+                repoId,
+                patch: {
+                  summaryStatus: 'failed',
+                  summaryProvider: 'glm',
+                  summaryUpdatedAt: new Date().toISOString(),
+                  summaryError:
+                    error instanceof Error ? error.message : '요약 상태를 불러오지 못했습니다.',
+                },
+              },
+            })
+            clearSummaryPolling(repoId)
+          }
+        }
+      }
+
+      const intervalId = window.setInterval(() => {
+        void pollSummaryStatus()
+      }, GITHUB_SUMMARY_POLL_INTERVAL_MS)
+      summaryPollTimersRef.current.set(repoId, intervalId)
+      void pollSummaryStatus()
+    },
+    [clearSummaryPolling],
+  )
 
   const flushRemoteSaveQueue = useCallback(async () => {
     if (saveInFlightRef.current || !pendingRemotePayloadRef.current) {
@@ -295,6 +414,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
       try {
         const remoteDashboard = await loadGithubDashboardFromRemote()
         if (!cancelled) {
+          transientRemoteLoadFailuresRef.current = 0
           setHasRemoteBaseline(true)
           setRemoteSyncDegraded(false)
           clearGithubDashboardCache()
@@ -326,11 +446,26 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
       } catch (error) {
         if (!cancelled) {
           remoteRevisionRef.current = null
-          setErrorMessage(
-            error instanceof Error
-              ? `${readOnlyMessage} (${error.message})`
-              : `${readOnlyMessage} (원격 대시보드 로딩 실패)`,
-          )
+          const transientError = isTransientRemoteSyncError(error)
+          if (transientError) {
+            transientRemoteLoadFailuresRef.current += 1
+            const failureCount = transientRemoteLoadFailuresRef.current
+            if (failureCount < REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK) {
+              setErrorMessage(
+                `${startupRetryMessage} 자동 재시도 중입니다. (${failureCount}/${REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK})`,
+              )
+            } else {
+              setErrorMessage(
+                `${readOnlyMessage} 서버 실행/네트워크/CORS 설정을 확인해 주세요.`,
+              )
+            }
+          } else {
+            setErrorMessage(
+              error instanceof Error
+                ? `${readOnlyMessage} (${error.message})`
+                : `${readOnlyMessage} (원격 대시보드 로딩 실패)`,
+            )
+          }
           setRemoteSyncDegraded(true)
           setSyncStatus('retrying')
         }
@@ -393,10 +528,19 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   ])
 
   useEffect(() => {
+    const summaryPollTimers = summaryPollTimersRef.current
+    const summaryPollFailures = summaryPollFailureCountRef.current
+
     return () => {
       if (saveDebounceTimeoutRef.current !== null) {
         window.clearTimeout(saveDebounceTimeoutRef.current)
       }
+
+      for (const timerId of summaryPollTimers.values()) {
+        window.clearInterval(timerId)
+      }
+      summaryPollTimers.clear()
+      summaryPollFailures.clear()
     }
   }, [])
 
@@ -445,6 +589,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
             })
           }
 
+          transientRemoteLoadFailuresRef.current = 0
           setHasRemoteBaseline(true)
           setRemoteSyncDegraded(false)
           setSyncStatus('recovered')
@@ -484,7 +629,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     void tryRecover()
     const intervalId = window.setInterval(() => {
       void tryRecover()
-    }, REMOTE_SYNC_RECOVERY_INTERVAL_MS)
+    }, hasRemoteBaseline ? REMOTE_SYNC_RECOVERY_INTERVAL_MS : 2000)
 
     return () => {
       cancelled = true
@@ -504,6 +649,24 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
   useEffect(() => {
     onSyncStatusChange?.({ status: syncStatus, lastSuccessAt: lastSyncSuccessAt })
   }, [lastSyncSuccessAt, onSyncStatusChange, syncStatus])
+
+  useEffect(() => {
+    const queuedRepoIds = new Set(
+      state.cards
+        .filter((card) => (card.summaryStatus ?? (card.summary.trim() ? 'ready' : 'idle')) === 'queued')
+        .map((card) => card.id),
+    )
+
+    for (const repoId of queuedRepoIds) {
+      startSummaryPolling(repoId)
+    }
+
+    for (const [repoId] of summaryPollTimersRef.current) {
+      if (!queuedRepoIds.has(repoId)) {
+        clearSummaryPolling(repoId)
+      }
+    }
+  }, [clearSummaryPolling, startSummaryPolling, state.cards])
 
   useEffect(() => {
     const maxPage = pageCount(effectiveVisibleCards.length, CARDS_PER_PAGE)
@@ -588,6 +751,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     }
 
     dispatch({ type: 'removeCard', payload: { repoId } })
+    clearSummaryPolling(repoId)
     removeRepoDetailCache(repoId)
   }
 
@@ -704,6 +868,76 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
     })
   }
 
+  const handleRegenerateSummary = async (repoId: string) => {
+    if (readOnlyMode) {
+      setErrorMessage(readOnlyMessage)
+      return
+    }
+
+    const target = state.cards.find((card) => card.id === repoId)
+    if (!target) {
+      return
+    }
+
+    setErrorMessage(null)
+    setGlobalWarningMessage(null)
+    dispatch({
+      type: 'patchCardSummary',
+      payload: {
+        repoId,
+        patch: {
+          summaryStatus: 'queued',
+          summaryProvider: 'none',
+          summaryError: null,
+        },
+      },
+    })
+
+    try {
+      const response = await regenerateGithubSummary(repoId, { force: true })
+      setGlobalWarningMessage(null)
+      dispatch({
+        type: 'patchCardSummary',
+        payload: {
+          repoId,
+          patch: {
+            summary: response.summaryStatus === 'ready' && response.summaryText ? response.summaryText : target.summary,
+            summaryStatus: response.summaryStatus,
+            summaryProvider: response.summaryProvider,
+            summaryUpdatedAt: response.summaryUpdatedAt,
+            summaryError: response.summaryError,
+          },
+        },
+      })
+
+      if (
+        response.summaryJobStatus === 'queued' ||
+        response.summaryJobStatus === 'running' ||
+        (response.summaryStatus === 'queued' && response.summaryJobStatus === 'idle')
+      ) {
+        startSummaryPolling(repoId)
+      } else {
+        clearSummaryPolling(repoId)
+      }
+    } catch (error) {
+      const summaryErrorMessage = error instanceof Error ? error.message : '요약 재생성에 실패했습니다.'
+      clearSummaryPolling(repoId)
+      setGlobalWarningMessage(`요약 재생성 실패: ${summaryErrorMessage}`)
+      dispatch({
+        type: 'patchCardSummary',
+        payload: {
+          repoId,
+          patch: {
+            summaryStatus: 'failed',
+            summaryProvider: 'glm',
+            summaryUpdatedAt: new Date().toISOString(),
+            summaryError: summaryErrorMessage,
+          },
+        },
+      })
+    }
+  }
+
   return (
     <>
       <section className="category-section" aria-label="카테고리 영역">
@@ -751,6 +985,12 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
       {readOnlyMode ? (
         <section className="main-only-notice" aria-live="polite">
           <p>{readOnlyMessage}</p>
+        </section>
+      ) : null}
+
+      {globalWarningMessage ? (
+        <section className="global-warning-banner" aria-live="polite" role="alert">
+          <p>{globalWarningMessage}</p>
         </section>
       ) : null}
 
@@ -823,6 +1063,7 @@ export const GithubFeatureEntry = ({ themeMode, onToggleTheme, onSyncStatusChang
                   onOpenDetail={handleOpenDetail}
                   onDelete={handleDeleteCard}
                   onMove={handleMoveCard}
+                  onRegenerateSummary={handleRegenerateSummary}
                 />
               ))}
             </div>

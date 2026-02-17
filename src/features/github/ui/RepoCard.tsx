@@ -10,6 +10,7 @@ type RepoCardProps = {
   onOpenDetail: (repoId: string) => void
   onDelete: (repoId: string) => void
   onMove: (repoId: string, targetCategoryId: CategoryId) => void
+  onRegenerateSummary: (repoId: string) => void
 }
 
 const Stat = ({ label, value }: { label: string; value: number }) => (
@@ -19,9 +20,37 @@ const Stat = ({ label, value }: { label: string; value: number }) => (
   </div>
 )
 
-export const RepoCard = ({ repo, categories, categoryName, readOnly = false, onOpenDetail, onDelete, onMove }: RepoCardProps) => {
+const summaryStatusLabel = (status: GitHubRepoCard['summaryStatus']): string => {
+  if (status === 'queued') {
+    return '요약 생성중'
+  }
+
+  if (status === 'ready') {
+    return '요약 완료'
+  }
+
+  if (status === 'failed') {
+    return '요약 실패'
+  }
+
+  return '요약 대기'
+}
+
+export const RepoCard = ({
+  repo,
+  categories,
+  categoryName,
+  readOnly = false,
+  onOpenDetail,
+  onDelete,
+  onMove,
+  onRegenerateSummary,
+}: RepoCardProps) => {
   const [isMoveMenuOpen, setIsMoveMenuOpen] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
+  const summaryStatus = repo.summaryStatus ?? (repo.summary.trim() ? 'ready' : 'idle')
+  const summaryText = repo.summary?.trim() || '요약 정보가 없습니다.'
+  const summaryTooltipId = `github-summary-tooltip-${repo.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   useEffect(() => {
     if (!isMoveMenuOpen) {
@@ -98,7 +127,29 @@ export const RepoCard = ({ repo, categories, categoryName, readOnly = false, onO
         </div>
       </header>
 
-      <p className="repo-summary">{repo.summary}</p>
+      <div className="github-summary-tooltip-wrap">
+        <p className="repo-summary" aria-describedby={summaryTooltipId} tabIndex={0}>
+          {summaryText}
+        </p>
+        <span id={summaryTooltipId} role="tooltip" className="github-summary-tooltip">
+          {summaryText}
+        </span>
+      </div>
+
+      <div className="repo-summary-controls" onClick={(event) => event.stopPropagation()}>
+        <span className={`repo-summary-badge summary-${summaryStatus}`}>{summaryStatusLabel(summaryStatus)}</span>
+        <button
+          type="button"
+          className="repo-summary-refresh"
+          disabled={readOnly || summaryStatus === 'queued'}
+          onClick={() => onRegenerateSummary(repo.id)}
+        >
+          {summaryStatus === 'queued' ? '생성중...' : '요약 재생성'}
+        </button>
+      </div>
+      {summaryStatus === 'failed' && repo.summaryError ? (
+        <p className="repo-summary-error">{repo.summaryError}</p>
+      ) : null}
 
       <div className="repo-meta-line">
         <span>언어: {repo.language ?? 'N/A'}</span>

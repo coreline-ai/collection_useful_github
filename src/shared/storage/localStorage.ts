@@ -48,10 +48,27 @@ export const loadCards = (): GitHubRepoCard[] => {
     [],
   )
 
-  return rawCards.map((card) => ({
-    ...card,
-    categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
-  }))
+  return rawCards
+    .filter((card) => Boolean(card?.id))
+    .map((card) => {
+      const summaryText = typeof card.summary === 'string' ? card.summary.trim() : ''
+      return {
+        ...card,
+        id: String(card.id).toLowerCase(),
+        categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+        summaryStatus:
+          card.summaryStatus === 'queued' ||
+          card.summaryStatus === 'ready' ||
+          card.summaryStatus === 'failed'
+            ? card.summaryStatus
+            : summaryText
+              ? 'ready'
+              : 'idle',
+        summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+        summaryUpdatedAt: card.summaryUpdatedAt ? String(card.summaryUpdatedAt) : null,
+        summaryError: card.summaryError ? String(card.summaryError) : null,
+      }
+    })
 }
 
 export const loadNotes = (): NotesByRepo => {
@@ -180,11 +197,32 @@ export const loadYoutubeCards = (): YouTubeVideoCard[] => {
     .map((card) => {
       const normalizedId = String(card.id)
       const videoId = card.videoId ? String(card.videoId) : normalizedId
+      const summaryText = typeof card.summaryText === 'string' ? card.summaryText : ''
       return {
         ...card,
         id: normalizedId,
         videoId,
         categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+        summaryText,
+        summaryStatus:
+          card.summaryStatus === 'queued' ||
+          card.summaryStatus === 'ready' ||
+          card.summaryStatus === 'failed'
+            ? card.summaryStatus
+            : summaryText.trim()
+              ? 'ready'
+              : 'idle',
+        summaryUpdatedAt: card.summaryUpdatedAt ? String(card.summaryUpdatedAt) : null,
+        summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+        summaryError: card.summaryError ? String(card.summaryError) : null,
+        notebookSourceStatus:
+          card.notebookSourceStatus === 'queued' ||
+          card.notebookSourceStatus === 'linked' ||
+          card.notebookSourceStatus === 'failed'
+            ? card.notebookSourceStatus
+            : 'disabled',
+        notebookSourceId: card.notebookSourceId ? String(card.notebookSourceId) : null,
+        notebookId: card.notebookId ? String(card.notebookId) : null,
       }
     })
 }
@@ -244,11 +282,24 @@ export const loadBookmarkCards = (): BookmarkCard[] => {
     .filter((card) => Boolean(card?.id))
     .map((card) => {
       const normalizedUrl = card.normalizedUrl ? String(card.normalizedUrl) : String(card.id)
+      const summaryText = typeof card.summaryText === 'string' ? card.summaryText : ''
       return {
         ...card,
         id: String(card.id),
         normalizedUrl,
         categoryId: card.categoryId ?? DEFAULT_MAIN_CATEGORY_ID,
+        summaryText,
+        summaryStatus:
+          card.summaryStatus === 'queued' ||
+          card.summaryStatus === 'ready' ||
+          card.summaryStatus === 'failed'
+            ? card.summaryStatus
+            : summaryText.trim()
+              ? 'ready'
+              : 'idle',
+        summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+        summaryUpdatedAt: card.summaryUpdatedAt ? String(card.summaryUpdatedAt) : null,
+        summaryError: card.summaryError ? String(card.summaryError) : null,
         linkStatus: card.linkStatus ?? 'unknown',
         lastCheckedAt: card.lastCheckedAt ?? null,
         lastStatusCode: card.lastStatusCode ?? null,

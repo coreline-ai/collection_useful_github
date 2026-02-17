@@ -6,6 +6,43 @@ import dns from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { getClient, query } from './db.js'
 import { migrate } from './migrate.js'
+import { generateGithubSummaryState, resolveGithubSummaryConfig } from './services/githubSummary.js'
+import {
+  buildGithubSummaryMetadataHash,
+  enqueueGithubSummaryJob,
+  getGithubSummaryCache,
+  getGithubSummaryCacheTtlMs,
+  getGithubSummaryMaxAttempts,
+  getGithubSummaryPromptVersion,
+  getLatestGithubSummaryJobByRepoId,
+  upsertGithubSummaryCache,
+} from './services/githubSummaryQueue.js'
+import { startGithubSummaryWorker } from './services/githubSummaryWorker.js'
+import { generateBookmarkSummaryState, resolveBookmarkSummaryConfig } from './services/bookmarkSummary.js'
+import {
+  buildBookmarkSummaryMetadataHash,
+  enqueueBookmarkSummaryJob,
+  getBookmarkSummaryCache,
+  getBookmarkSummaryCacheTtlMs,
+  getBookmarkSummaryMaxAttempts,
+  getBookmarkSummaryPromptVersion,
+  getLatestBookmarkSummaryJobByBookmarkId,
+  upsertBookmarkSummaryCache,
+} from './services/bookmarkSummaryQueue.js'
+import { startBookmarkSummaryWorker } from './services/bookmarkSummaryWorker.js'
+import { generateYoutubeSummaryState, resolveYoutubeSummaryConfig } from './services/youtubeSummary.js'
+import {
+  buildYoutubeSummaryMetadataHash,
+  enqueueYoutubeSummaryJob,
+  getLatestYoutubeSummaryJobByVideoId,
+  getYoutubeSummaryCache,
+  getYoutubeSummaryCacheTtlMs,
+  getYoutubeSummaryMaxAttempts,
+  getYoutubeSummaryPromptVersion,
+  retryYoutubeSummaryJobById,
+  upsertYoutubeSummaryCache,
+} from './services/youtubeSummaryQueue.js'
+import { startYoutubeSummaryWorker } from './services/youtubeSummaryWorker.js'
 
 dotenv.config()
 
@@ -15,7 +52,17 @@ const DASHBOARD_META_KEY = 'github_dashboard_v1'
 const YOUTUBE_DASHBOARD_META_KEY = 'youtube_dashboard_v1'
 const BOOKMARK_DASHBOARD_META_KEY = 'bookmark_dashboard_v1'
 const youtubeApiKey = (process.env.YOUTUBE_API_KEY || '').trim()
+const githubApiToken = (process.env.GITHUB_API_TOKEN || process.env.GITHUB_TOKEN || '').trim()
 const adminApiToken = (process.env.ADMIN_API_TOKEN || '').trim()
+const githubApiTimeoutSeconds = Number(process.env.GITHUB_API_TIMEOUT_SECONDS || 12)
+const githubApiTimeoutMs = Number.isFinite(githubApiTimeoutSeconds) && githubApiTimeoutSeconds > 0
+  ? Math.floor(githubApiTimeoutSeconds * 1000)
+  : 12000
+const githubSummaryReadmeMaxBytesRaw = Number(process.env.GITHUB_SUMMARY_README_MAX_BYTES || 8192)
+const githubSummaryReadmeMaxBytes =
+  Number.isFinite(githubSummaryReadmeMaxBytesRaw) && githubSummaryReadmeMaxBytesRaw > 0
+    ? Math.floor(githubSummaryReadmeMaxBytesRaw)
+    : 8192
 const youtubeTimeoutSeconds = Number(process.env.YOUTUBE_API_TIMEOUT_SECONDS || 12)
 const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeoutSeconds > 0
   ? Math.floor(youtubeTimeoutSeconds * 1000)
@@ -43,6 +90,10 @@ const DEFAULT_CATEGORIES = [
     createdAt: new Date('2026-01-01T00:00:00.000Z').toISOString(),
   },
 ]
+
+let youtubeSummaryWorkerRuntime = null
+let githubSummaryWorkerRuntime = null
+let bookmarkSummaryWorkerRuntime = null
 
 const app = express()
 app.use(express.json({ limit: '8mb' }))
@@ -80,7 +131,10 @@ const applyApiCacheControl = (req, res, next) => {
 
   if (
     req.path.startsWith('/api/github/dashboard') ||
+    req.path.startsWith('/api/github/summaries') ||
     req.path.startsWith('/api/youtube/dashboard') ||
+    req.path.startsWith('/api/youtube/summaries') ||
+    req.path.startsWith('/api/bookmark/summaries') ||
     req.path.startsWith('/api/bookmark/dashboard') ||
     req.path.startsWith('/api/admin/')
   ) {
@@ -255,6 +309,26 @@ const toIso = (value) => {
   }
 
   return date.toISOString()
+}
+
+const resolveYoutubeSummaryStatus = (value, summaryText = '') => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return String(summaryText || '').trim() ? 'ready' : 'idle'
+}
+
+const resolveYoutubeSummaryProvider = (value) => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const resolveYoutubeNotebookStatus = (value) => {
+  if (value === 'queued' || value === 'linked' || value === 'failed') {
+    return value
+  }
+
+  return 'disabled'
 }
 
 const ensureProvider = (provider) => {
@@ -435,6 +509,7 @@ const normalizeBookmarkDashboardPayload = (rawDashboard) => {
 
 const toGithubUnifiedItems = (cards) => {
   return cards.map((card, index) => {
+    const normalizedSummary = String(card.summary || '').replace(/\s+/g, ' ').trim()
     const normalizedCard = {
       id: String(card.id || '').toLowerCase(),
       categoryId: String(card.categoryId || 'main'),
@@ -442,7 +517,7 @@ const toGithubUnifiedItems = (cards) => {
       repo: String(card.repo || ''),
       fullName: String(card.fullName || ''),
       description: String(card.description || ''),
-      summary: String(card.summary || ''),
+      summary: normalizedSummary,
       htmlUrl: String(card.htmlUrl || ''),
       homepage: card.homepage ? String(card.homepage) : null,
       language: card.language ? String(card.language) : null,
@@ -456,6 +531,17 @@ const toGithubUnifiedItems = (cards) => {
       createdAt: toIso(card.createdAt || new Date().toISOString()),
       updatedAt: toIso(card.updatedAt || new Date().toISOString()),
       addedAt: toIso(card.addedAt || new Date().toISOString()),
+      summaryStatus:
+        card.summaryStatus === 'queued' ||
+        card.summaryStatus === 'ready' ||
+        card.summaryStatus === 'failed'
+          ? card.summaryStatus
+          : normalizedSummary
+            ? 'ready'
+            : 'idle',
+      summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryError: card.summaryError ? String(card.summaryError) : null,
     }
 
     return normalizeItem('github', {
@@ -490,6 +576,7 @@ const toGithubUnifiedItems = (cards) => {
 const toYoutubeUnifiedItems = (cards) => {
   return cards.map((card, index) => {
     const videoId = String(card.videoId || card.id || '')
+    const normalizedSummaryText = typeof card.summaryText === 'string' ? card.summaryText.replace(/\s+/g, ' ').trim() : ''
     const normalizedCard = {
       id: String(card.id || videoId),
       videoId,
@@ -505,20 +592,32 @@ const toYoutubeUnifiedItems = (cards) => {
         typeof card.likeCount === 'number' && Number.isFinite(card.likeCount)
           ? Number(card.likeCount)
           : null,
+      summaryText: normalizedSummaryText,
+      summaryStatus: resolveYoutubeSummaryStatus(card.summaryStatus, normalizedSummaryText),
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryProvider: resolveYoutubeSummaryProvider(card.summaryProvider),
+      summaryError: card.summaryError ? String(card.summaryError) : null,
+      notebookSourceStatus: resolveYoutubeNotebookStatus(card.notebookSourceStatus),
+      notebookSourceId: card.notebookSourceId ? String(card.notebookSourceId) : null,
+      notebookId: card.notebookId ? String(card.notebookId) : null,
       addedAt: toIso(card.addedAt || new Date().toISOString()),
       updatedAt: toIso(card.updatedAt || card.publishedAt || new Date().toISOString()),
     }
 
-    const summary = normalizedCard.description
+    const descriptionSummary = normalizedCard.description
       ? normalizedCard.description.replace(/\s+/g, ' ').trim().slice(0, 180)
       : '영상 설명이 없습니다.'
+    const summary = normalizedCard.summaryText || descriptionSummary
 
     return normalizeItem('youtube', {
       id: `youtube:${videoId}`,
       type: 'video',
       nativeId: videoId,
       title: normalizedCard.title,
-      summary: summary.length < normalizedCard.description.length ? `${summary.slice(0, 177)}...` : summary,
+      summary:
+        summary.length < normalizedCard.description.length && !normalizedCard.summaryText
+          ? `${summary.slice(0, 177)}...`
+          : summary,
       description: normalizedCard.description,
       url: normalizedCard.videoUrl,
       tags: [],
@@ -553,6 +652,11 @@ const toBookmarkUnifiedItems = (cards) => {
       domain: String(card.domain || ''),
       title: String(card.title || card.domain || normalizedUrl),
       excerpt: String(card.excerpt || ''),
+      summaryText: typeof card.summaryText === 'string' ? card.summaryText.replace(/\s+/g, ' ').trim() : '',
+      summaryStatus: resolveBookmarkSummaryStatus(card.summaryStatus, String(card.summaryText || '').replace(/\s+/g, ' ').trim()),
+      summaryProvider: resolveBookmarkSummaryProvider(card.summaryProvider),
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryError: card.summaryError ? String(card.summaryError) : null,
       thumbnailUrl: card.thumbnailUrl ? String(card.thumbnailUrl) : null,
       faviconUrl: card.faviconUrl ? String(card.faviconUrl) : null,
       tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : [],
@@ -581,8 +685,8 @@ const toBookmarkUnifiedItems = (cards) => {
       type: 'bookmark',
       nativeId: normalizedCard.normalizedUrl,
       title: normalizedCard.title,
-      summary: normalizedCard.excerpt,
-      description: normalizedCard.excerpt,
+      summary: normalizedCard.summaryText || normalizedCard.excerpt,
+      description: normalizedCard.summaryText || normalizedCard.excerpt,
       url: normalizedCard.url,
       tags: normalizedCard.tags,
       author: normalizedCard.domain,
@@ -597,6 +701,10 @@ const toBookmarkUnifiedItems = (cards) => {
         categoryId: normalizedCard.categoryId,
         sortIndex: index,
         metadataStatus: normalizedCard.metadataStatus,
+        summaryStatus: normalizedCard.summaryStatus,
+        summaryProvider: normalizedCard.summaryProvider,
+        summaryUpdatedAt: normalizedCard.summaryUpdatedAt,
+        summaryError: normalizedCard.summaryError,
         linkStatus: normalizedCard.linkStatus,
         lastCheckedAt: normalizedCard.lastCheckedAt,
         lastStatusCode: normalizedCard.lastStatusCode,
@@ -611,6 +719,8 @@ const mapItemRowToGithubCard = (row) => {
 
   if (raw.card && typeof raw.card === 'object') {
     const card = raw.card
+    const summaryText = typeof card.summary === 'string' ? card.summary : String(row.summary || '')
+    const normalizedSummary = summaryText.replace(/\s+/g, ' ').trim()
 
     return {
       ...card,
@@ -634,10 +744,22 @@ const mapItemRowToGithubCard = (row) => {
       createdAt: toIso(card.createdAt || row.createdAt),
       updatedAt: toIso(card.updatedAt || row.updatedAt),
       addedAt: toIso(card.addedAt || row.savedAt),
+      summaryStatus:
+        card.summaryStatus === 'queued' ||
+        card.summaryStatus === 'ready' ||
+        card.summaryStatus === 'failed'
+          ? card.summaryStatus
+          : normalizedSummary
+            ? 'ready'
+            : 'idle',
+      summaryProvider: card.summaryProvider === 'glm' ? 'glm' : 'none',
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryError: card.summaryError ? String(card.summaryError) : null,
     }
   }
 
   const [owner = '', repo = ''] = String(row.nativeId || '').split('/')
+  const summaryText = String(row.summary || '').replace(/\s+/g, ' ').trim()
 
   return {
     id: String(row.nativeId || '').toLowerCase(),
@@ -646,7 +768,7 @@ const mapItemRowToGithubCard = (row) => {
     repo,
     fullName: String(row.title || row.nativeId || ''),
     description: String(row.description || ''),
-    summary: String(row.summary || ''),
+    summary: summaryText,
     htmlUrl: String(row.url || ''),
     homepage: raw.homepage ? String(raw.homepage) : null,
     language: row.language ? String(row.language) : null,
@@ -660,6 +782,10 @@ const mapItemRowToGithubCard = (row) => {
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     addedAt: toIso(row.savedAt),
+    summaryStatus: summaryText ? 'ready' : 'idle',
+    summaryProvider: raw.summaryProvider === 'glm' ? 'glm' : 'none',
+    summaryUpdatedAt: raw.summaryUpdatedAt ? toIso(raw.summaryUpdatedAt) : null,
+    summaryError: raw.summaryError ? String(raw.summaryError) : null,
   }
 }
 
@@ -668,6 +794,7 @@ const mapItemRowToYoutubeCard = (row) => {
 
   if (raw.card && typeof raw.card === 'object') {
     const card = raw.card
+    const summaryText = typeof card.summaryText === 'string' ? card.summaryText : String(row.summary || '')
 
     return {
       id: String(card.id || row.nativeId),
@@ -686,6 +813,14 @@ const mapItemRowToYoutubeCard = (row) => {
           : typeof row.metrics?.likes === 'number'
             ? Number(row.metrics.likes)
             : null,
+      summaryText,
+      summaryStatus: resolveYoutubeSummaryStatus(card.summaryStatus, summaryText),
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryProvider: resolveYoutubeSummaryProvider(card.summaryProvider),
+      summaryError: card.summaryError ? String(card.summaryError) : null,
+      notebookSourceStatus: resolveYoutubeNotebookStatus(card.notebookSourceStatus),
+      notebookSourceId: card.notebookSourceId ? String(card.notebookSourceId) : null,
+      notebookId: card.notebookId ? String(card.notebookId) : null,
       addedAt: toIso(card.addedAt || row.savedAt),
       updatedAt: toIso(card.updatedAt || row.updatedAt),
     }
@@ -705,6 +840,14 @@ const mapItemRowToYoutubeCard = (row) => {
     publishedAt: toIso(row.createdAt),
     viewCount: Number(row.metrics?.views || 0),
     likeCount: typeof row.metrics?.likes === 'number' ? Number(row.metrics.likes) : null,
+    summaryText: String(row.summary || ''),
+    summaryStatus: 'ready',
+    summaryUpdatedAt: toIso(row.updatedAt),
+    summaryProvider: 'none',
+    summaryError: null,
+    notebookSourceStatus: 'disabled',
+    notebookSourceId: null,
+    notebookId: null,
     addedAt: toIso(row.savedAt),
     updatedAt: toIso(row.updatedAt),
   }
@@ -716,6 +859,10 @@ const mapItemRowToBookmarkCard = (row) => {
   if (raw.card && typeof raw.card === 'object') {
     const card = raw.card
     const normalizedUrl = String(card.normalizedUrl || row.nativeId || row.url || '')
+    const excerpt = String(card.excerpt || row.description || row.summary || '')
+    const rawSummaryText = typeof card.summaryText === 'string' ? card.summaryText : ''
+    const summaryText =
+      rawSummaryText.trim() || (row.summary && row.summary !== excerpt ? String(row.summary) : '')
 
     return {
       id: String(card.id || normalizedUrl),
@@ -725,7 +872,12 @@ const mapItemRowToBookmarkCard = (row) => {
       canonicalUrl: card.canonicalUrl ? String(card.canonicalUrl) : null,
       domain: String(card.domain || row.author || ''),
       title: String(card.title || row.title || normalizedUrl),
-      excerpt: String(card.excerpt || row.summary || row.description || ''),
+      excerpt,
+      summaryText,
+      summaryStatus: resolveBookmarkSummaryStatus(card.summaryStatus, summaryText),
+      summaryProvider: resolveBookmarkSummaryProvider(card.summaryProvider),
+      summaryUpdatedAt: card.summaryUpdatedAt ? toIso(card.summaryUpdatedAt) : null,
+      summaryError: card.summaryError ? String(card.summaryError) : null,
       thumbnailUrl: card.thumbnailUrl ? String(card.thumbnailUrl) : null,
       faviconUrl: card.faviconUrl ? String(card.faviconUrl) : null,
       tags: Array.isArray(card.tags) ? card.tags.map((tag) => String(tag)) : row.tags || [],
@@ -751,6 +903,8 @@ const mapItemRowToBookmarkCard = (row) => {
   }
 
   const normalizedUrl = String(row.nativeId || row.url || '')
+  const excerpt = String(row.description || row.summary || '미리보기를 가져오지 못했습니다.')
+  const summaryText = row.summary && row.summary !== excerpt ? String(row.summary) : ''
   return {
     id: normalizedUrl,
     categoryId: String(raw.categoryId || 'main'),
@@ -759,7 +913,12 @@ const mapItemRowToBookmarkCard = (row) => {
     canonicalUrl: null,
     domain: String(row.author || ''),
     title: String(row.title || row.author || normalizedUrl),
-    excerpt: String(row.summary || row.description || '미리보기를 가져오지 못했습니다.'),
+    excerpt,
+    summaryText,
+    summaryStatus: resolveBookmarkSummaryStatus('ready', summaryText),
+    summaryProvider: 'none',
+    summaryUpdatedAt: toIso(row.updatedAt),
+    summaryError: null,
     thumbnailUrl: null,
     faviconUrl: null,
     tags: Array.isArray(row.tags) ? row.tags.map((tag) => String(tag)) : [],
@@ -1504,6 +1663,858 @@ const parseYoutubeErrorMessage = (payload, fallback) => {
   return typeof firstError?.message === 'string' && firstError.message ? firstError.message : fallback
 }
 
+const resolveGithubSummaryStatus = (value, summaryText = '') => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return String(summaryText || '').trim() ? 'ready' : 'idle'
+}
+
+const resolveGithubSummaryProvider = (value) => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const resolveBookmarkSummaryStatus = (value, summaryText = '') => {
+  if (value === 'queued' || value === 'ready' || value === 'failed') {
+    return value
+  }
+
+  return String(summaryText || '').trim() ? 'ready' : 'idle'
+}
+
+const resolveBookmarkSummaryProvider = (value) => {
+  return value === 'glm' ? 'glm' : 'none'
+}
+
+const parseGithubRepoId = (repoId) => {
+  const normalized = String(repoId || '').trim().toLowerCase()
+  const match = normalized.match(/^([a-z0-9_.-]+)\/([a-z0-9_.-]+)$/i)
+  if (!match) {
+    return null
+  }
+
+  return {
+    repoId: `${match[1]}/${match[2]}`.toLowerCase(),
+    owner: match[1],
+    repo: match[2],
+  }
+}
+
+const createGithubApiHeaders = () => {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+  }
+
+  if (githubApiToken) {
+    headers.Authorization = `Bearer ${githubApiToken}`
+  }
+
+  return headers
+}
+
+const parseGithubApiErrorMessage = async (response) => {
+  const payload = await response.json().catch(() => ({}))
+  const remoteMessage = String(payload?.message || '')
+  const lower = remoteMessage.toLowerCase()
+
+  if (response.status === 404) {
+    return '저장소를 찾을 수 없습니다. URL의 owner/repo 경로를 확인해 주세요.'
+  }
+
+  if (response.status === 403) {
+    if (lower.includes('rate limit')) {
+      return 'GitHub API 요청 제한에 도달했습니다. GITHUB_API_TOKEN 설정을 권장합니다.'
+    }
+    return '이 저장소 정보에 접근할 수 없습니다.'
+  }
+
+  return remoteMessage ? `GitHub API 오류: ${remoteMessage}` : `GitHub API 요청 실패 (${response.status})`
+}
+
+const trimTextByBytes = (value, maxBytes) => {
+  const text = String(value || '')
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) {
+    return text
+  }
+
+  let low = 0
+  let high = text.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    const chunk = text.slice(0, mid)
+    if (Buffer.byteLength(chunk, 'utf8') <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return text.slice(0, low)
+}
+
+const fetchGithubRepoMetadata = async (repoId) => {
+  const parsed = parseGithubRepoId(repoId)
+  if (!parsed) {
+    const error = new Error('유효한 GitHub 저장소 ID(owner/repo)가 아닙니다.')
+    error.status = 400
+    throw error
+  }
+
+  let response
+  try {
+    response = await fetchWithTimeout(
+      `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`,
+      githubApiTimeoutMs,
+      {
+        headers: createGithubApiHeaders(),
+      },
+    )
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      const timeoutError = new Error('GitHub API 요청 시간이 초과되었습니다.')
+      timeoutError.status = 408
+      throw timeoutError
+    }
+
+    throw error
+  }
+
+  if (!response.ok) {
+    const failure = new Error(await parseGithubApiErrorMessage(response))
+    failure.status = response.status
+    throw failure
+  }
+
+  const payload = await response.json().catch(() => ({}))
+
+  return {
+    repoId: parsed.repoId,
+    owner: parsed.owner,
+    repo: parsed.repo,
+    fullName: String(payload.full_name || parsed.repoId),
+    description: String(payload.description || ''),
+  }
+}
+
+const fetchGithubReadmePreview = async (owner, repo) => {
+  let response
+  try {
+    response = await fetchWithTimeout(
+      `https://api.github.com/repos/${owner}/${repo}/readme`,
+      githubApiTimeoutMs,
+      {
+        headers: createGithubApiHeaders(),
+      },
+    )
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return ''
+    }
+
+    throw error
+  }
+
+  if (response.status === 404) {
+    return ''
+  }
+
+  if (!response.ok) {
+    const failure = new Error(await parseGithubApiErrorMessage(response))
+    failure.status = response.status
+    throw failure
+  }
+
+  const payload = await response.json().catch(() => ({}))
+  if (payload?.encoding !== 'base64' || !payload?.content) {
+    return ''
+  }
+
+  const decoded = Buffer.from(String(payload.content).replace(/\n/g, ''), 'base64').toString('utf8')
+  return trimTextByBytes(decoded, githubSummaryReadmeMaxBytes)
+}
+
+const fetchYoutubeVideoMetadata = async (videoId) => {
+  if (!youtubeApiKey) {
+    const error = new Error('YOUTUBE_API_KEY가 설정되지 않았습니다.')
+    error.status = 503
+    throw error
+  }
+
+  const apiUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
+  apiUrl.searchParams.set('part', 'snippet,statistics')
+  apiUrl.searchParams.set('id', videoId)
+  apiUrl.searchParams.set('key', youtubeApiKey)
+
+  let response
+  try {
+    response = await fetchWithTimeout(apiUrl.toString(), youtubeTimeoutMs)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      const timeoutError = new Error('YouTube API 요청 시간이 초과되었습니다.')
+      timeoutError.status = 408
+      throw timeoutError
+    }
+    throw error
+  }
+
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    const apiMessage = parseYoutubeErrorMessage(payload, 'YouTube API 요청에 실패했습니다.')
+    const lowerMessage = apiMessage.toLowerCase()
+
+    const failure = new Error(
+      lowerMessage.includes('quota')
+        ? 'YouTube API 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.'
+        : `YouTube API 오류: ${apiMessage}`,
+    )
+    failure.status = response.status === 403 && lowerMessage.includes('quota') ? 403 : response.status
+    throw failure
+  }
+
+  const item = Array.isArray(payload.items) ? payload.items[0] : null
+  if (!item) {
+    const notFound = new Error('영상을 찾을 수 없습니다. URL을 확인해 주세요.')
+    notFound.status = 404
+    throw notFound
+  }
+
+  const snippet = item.snippet || {}
+  const statistics = item.statistics || {}
+  const thumbnails = snippet.thumbnails || {}
+  const thumbnailUrl =
+    thumbnails.maxres?.url ||
+    thumbnails.standard?.url ||
+    thumbnails.high?.url ||
+    thumbnails.medium?.url ||
+    thumbnails.default?.url ||
+    ''
+
+  return {
+    videoId: String(item.id || videoId),
+    title: String(snippet.title || ''),
+    channelTitle: String(snippet.channelTitle || ''),
+    description: String(snippet.description || ''),
+    thumbnailUrl: String(thumbnailUrl),
+    publishedAt: toIso(snippet.publishedAt || new Date().toISOString()),
+    viewCount: Number(statistics.viewCount || 0),
+    likeCount:
+      typeof statistics.likeCount === 'string' || typeof statistics.likeCount === 'number'
+        ? Number(statistics.likeCount)
+        : null,
+    url: `https://www.youtube.com/watch?v=${String(item.id || videoId)}`,
+    updatedAt: toIso(snippet.publishedAt || new Date().toISOString()),
+  }
+}
+
+const loadGithubItemByRepoId = async (repoId) => {
+  const parsed = parseGithubRepoId(repoId)
+  if (!parsed) {
+    return null
+  }
+
+  const result = await query(
+    `
+      SELECT
+        id,
+        provider,
+        type,
+        native_id AS "nativeId",
+        title,
+        summary,
+        description,
+        url,
+        tags,
+        author,
+        language,
+        metrics,
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        saved_at AS "savedAt",
+        raw
+      FROM unified_items
+      WHERE provider = 'github' AND LOWER(native_id) = LOWER($1)
+      LIMIT 1
+    `,
+    [parsed.repoId],
+  )
+
+  if (!result.rowCount) {
+    return null
+  }
+
+  return mapItemRowToGithubCard(result.rows[0])
+}
+
+const buildGithubSummaryColumnValue = (card) => {
+  const summaryText = String(card.summary || '').replace(/\s+/g, ' ').trim()
+  if (!summaryText) {
+    return 'No description available for this repository yet.'
+  }
+
+  return summaryText.length <= 220 ? summaryText : `${summaryText.slice(0, 217)}...`
+}
+
+const persistGithubSummaryToSnapshot = async (repoId, summaryPayload) => {
+  const existing = await loadGithubItemByRepoId(repoId)
+  if (!existing) {
+    return null
+  }
+
+  const now = toIso(new Date())
+  const nextSummary =
+    typeof summaryPayload.summaryText === 'string' && summaryPayload.summaryText.trim()
+      ? summaryPayload.summaryText.trim()
+      : existing.summary
+
+  const nextCard = {
+    ...existing,
+    summary: nextSummary,
+    summaryStatus: resolveGithubSummaryStatus(summaryPayload.summaryStatus, nextSummary),
+    summaryProvider: resolveGithubSummaryProvider(summaryPayload.summaryProvider),
+    summaryUpdatedAt: summaryPayload.summaryUpdatedAt ? toIso(summaryPayload.summaryUpdatedAt) : now,
+    summaryError: summaryPayload.summaryError ? String(summaryPayload.summaryError) : null,
+    updatedAt: now,
+  }
+
+  const summaryColumnValue = buildGithubSummaryColumnValue(nextCard)
+
+  await query(
+    `
+      UPDATE unified_items
+      SET
+        summary = $1,
+        updated_at = $2::timestamptz,
+        raw = jsonb_set(COALESCE(raw, '{}'::jsonb), '{card}', $3::jsonb, true)
+      WHERE provider = 'github' AND LOWER(native_id) = LOWER($4)
+    `,
+    [summaryColumnValue, now, JSON.stringify(nextCard), repoId],
+  )
+
+  return nextCard
+}
+
+const toGithubSummaryResponseFromCache = (cacheEntry, fallbackSummary = '') => {
+  const summaryText = String(cacheEntry?.summaryText || fallbackSummary || '').trim()
+  const now = new Date().toISOString()
+  return {
+    summaryText,
+    summaryStatus: summaryText ? 'ready' : 'idle',
+    summaryUpdatedAt: cacheEntry?.generatedAt ? toIso(cacheEntry.generatedAt) : now,
+    summaryProvider: resolveGithubSummaryProvider(cacheEntry?.provider || 'glm'),
+    summaryError: null,
+  }
+}
+
+const toGithubSummaryResponseFromJob = (job, fallbackSummary = '') => {
+  const status = String(job?.status || '').toLowerCase()
+  if (status === 'queued' || status === 'running') {
+    return {
+      summaryText: fallbackSummary,
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+    }
+  }
+
+  if (status === 'failed' || status === 'dead') {
+    return {
+      summaryText: fallbackSummary,
+      summaryStatus: 'failed',
+      summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : new Date().toISOString(),
+      summaryProvider: 'glm',
+      summaryError: job?.errorMessage || '요약 생성에 실패했습니다.',
+    }
+  }
+
+  const summaryText = job?.resultSummary ? String(job.resultSummary) : fallbackSummary
+  return {
+    summaryText,
+    summaryStatus: summaryText ? 'ready' : 'idle',
+    summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : null,
+    summaryProvider: summaryText ? 'glm' : 'none',
+    summaryError: null,
+  }
+}
+
+const processGithubSummaryJob = async (job) => {
+  const repoId = String(job?.repoId || job?.payload?.repoId || '').trim().toLowerCase()
+  const parsed = parseGithubRepoId(repoId)
+  if (!parsed) {
+    const error = new Error('요약 작업의 repoId(owner/repo)가 비어 있습니다.')
+    error.status = 400
+    error.code = 'missing_repo_id'
+    throw error
+  }
+
+  const payload = job?.payload && typeof job.payload === 'object' ? job.payload : {}
+  const force = parseBoolean(payload.force, false)
+  const cardMetadata = payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}
+
+  const description = String(cardMetadata.description || '')
+  const readme = String(cardMetadata.readme || '')
+
+  const [repoMetadata, storedCard] = await Promise.all([
+    description
+      ? Promise.resolve({
+          repoId: parsed.repoId,
+          owner: parsed.owner,
+          repo: parsed.repo,
+          fullName: String(cardMetadata.fullName || parsed.repoId),
+          description,
+        })
+      : fetchGithubRepoMetadata(parsed.repoId),
+    loadGithubItemByRepoId(parsed.repoId),
+  ])
+
+  const readmePreview = readme || (await fetchGithubReadmePreview(repoMetadata.owner, repoMetadata.repo))
+
+  const config = resolveGithubSummaryConfig(process.env)
+  const summaryState = await generateGithubSummaryState({
+    metadata: {
+      repoId: parsed.repoId,
+      fullName: repoMetadata.fullName,
+      description: repoMetadata.description,
+      readme: readmePreview,
+    },
+    currentCard: storedCard,
+    force,
+    config,
+  })
+
+  await persistGithubSummaryToSnapshot(parsed.repoId, summaryState)
+
+  if (summaryState.summaryStatus === 'ready' && summaryState.summaryText.trim()) {
+    const metadataHash = buildGithubSummaryMetadataHash({
+      repoId: parsed.repoId,
+      description: repoMetadata.description,
+      readme: readmePreview,
+    })
+    await upsertGithubSummaryCache({
+      repoId: parsed.repoId,
+      metadataHash,
+      promptVersion: getGithubSummaryPromptVersion(),
+      provider: summaryState.summaryProvider || 'glm',
+      summaryText: summaryState.summaryText,
+      ttlMs: getGithubSummaryCacheTtlMs(),
+    })
+
+    return {
+      ...summaryState,
+      resultSummary: summaryState.summaryText,
+    }
+  }
+
+  const failure = new Error(summaryState.summaryError || '요약 생성에 실패했습니다.')
+  failure.code = 'summary_generation_failed'
+  failure.retryable = false
+  throw failure
+}
+
+const loadYoutubeItemByVideoId = async (videoId) => {
+  const result = await query(
+    `
+      SELECT
+        id,
+        provider,
+        type,
+        native_id AS "nativeId",
+        title,
+        summary,
+        description,
+        url,
+        tags,
+        author,
+        language,
+        metrics,
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        saved_at AS "savedAt",
+        raw
+      FROM unified_items
+      WHERE provider = 'youtube' AND native_id = $1
+      LIMIT 1
+    `,
+    [videoId],
+  )
+
+  if (!result.rowCount) {
+    return null
+  }
+
+  return mapItemRowToYoutubeCard(result.rows[0])
+}
+
+const buildYoutubeSummaryColumnValue = (card) => {
+  const summaryText = String(card.summaryText || '').replace(/\s+/g, ' ').trim()
+  if (summaryText) {
+    return summaryText.length <= 220 ? summaryText : `${summaryText.slice(0, 217)}...`
+  }
+
+  const description = String(card.description || '').replace(/\s+/g, ' ').trim()
+  if (!description) {
+    return '영상 설명이 없습니다.'
+  }
+
+  return description.length <= 180 ? description : `${description.slice(0, 177)}...`
+}
+
+const persistYoutubeSummaryToSnapshot = async (videoId, summaryPayload) => {
+  const existing = await loadYoutubeItemByVideoId(videoId)
+  if (!existing) {
+    return null
+  }
+
+  const now = toIso(new Date())
+  const nextCard = {
+    ...existing,
+    ...summaryPayload,
+    summaryText: String(summaryPayload.summaryText || ''),
+    summaryStatus: resolveYoutubeSummaryStatus(summaryPayload.summaryStatus),
+    summaryUpdatedAt: summaryPayload.summaryUpdatedAt ? toIso(summaryPayload.summaryUpdatedAt) : now,
+    summaryProvider: resolveYoutubeSummaryProvider(summaryPayload.summaryProvider),
+    summaryError: summaryPayload.summaryError ? String(summaryPayload.summaryError) : null,
+    notebookSourceStatus: resolveYoutubeNotebookStatus(summaryPayload.notebookSourceStatus),
+    notebookSourceId: summaryPayload.notebookSourceId ? String(summaryPayload.notebookSourceId) : null,
+    notebookId: summaryPayload.notebookId ? String(summaryPayload.notebookId) : null,
+    updatedAt: now,
+  }
+
+  const summaryColumnValue = buildYoutubeSummaryColumnValue(nextCard)
+
+  await query(
+    `
+      UPDATE unified_items
+      SET
+        summary = $1,
+        updated_at = $2::timestamptz,
+        raw = jsonb_set(COALESCE(raw, '{}'::jsonb), '{card}', $3::jsonb, true)
+      WHERE provider = 'youtube' AND native_id = $4
+    `,
+    [summaryColumnValue, now, JSON.stringify(nextCard), videoId],
+  )
+
+  return nextCard
+}
+
+const toYoutubeSummaryResponseFromCache = (cacheEntry) => {
+  const now = new Date().toISOString()
+  return {
+    summaryText: String(cacheEntry?.summaryText || ''),
+    summaryStatus: 'ready',
+    summaryUpdatedAt: cacheEntry?.generatedAt ? toIso(cacheEntry.generatedAt) : now,
+    summaryProvider: resolveYoutubeSummaryProvider(cacheEntry?.provider || 'glm'),
+    summaryError: null,
+    notebookSourceStatus: cacheEntry?.notebookSourceId ? 'linked' : 'disabled',
+    notebookSourceId: cacheEntry?.notebookSourceId || null,
+    notebookId: cacheEntry?.notebookId || null,
+  }
+}
+
+const toYoutubeSummaryResponseFromJob = (job) => {
+  const status = String(job?.status || '').toLowerCase()
+  if (status === 'queued' || status === 'running') {
+    return {
+      summaryText: '',
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+      notebookSourceStatus: 'disabled',
+      notebookSourceId: null,
+      notebookId: null,
+    }
+  }
+
+  if (status === 'failed' || status === 'dead') {
+    return {
+      summaryText: '',
+      summaryStatus: 'failed',
+      summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : new Date().toISOString(),
+      summaryProvider: 'none',
+      summaryError: job?.errorMessage || '요약 생성에 실패했습니다.',
+      notebookSourceStatus: 'disabled',
+      notebookSourceId: null,
+      notebookId: null,
+    }
+  }
+
+  return {
+    summaryText: job?.resultSummary ? String(job.resultSummary) : '',
+    summaryStatus: job?.resultSummary ? 'ready' : 'idle',
+    summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : null,
+    summaryProvider: job?.resultSummary ? 'glm' : 'none',
+    summaryError: null,
+    notebookSourceStatus: 'disabled',
+    notebookSourceId: null,
+    notebookId: null,
+  }
+}
+
+const processYoutubeSummaryJob = async (job) => {
+  const videoId = String(job?.videoId || job?.payload?.videoId || '').trim()
+  if (!videoId) {
+    const error = new Error('요약 작업의 videoId가 비어 있습니다.')
+    error.status = 400
+    error.code = 'missing_video_id'
+    throw error
+  }
+
+  const payload = job?.payload && typeof job.payload === 'object' ? job.payload : {}
+  const force = parseBoolean(payload.force, false)
+
+  const [videoMetadata, storedCard] = await Promise.all([
+    fetchYoutubeVideoMetadata(videoId),
+    loadYoutubeItemByVideoId(videoId),
+  ])
+
+  const config = resolveYoutubeSummaryConfig(process.env)
+  const summaryState = await generateYoutubeSummaryState({
+    videoId,
+    metadata: videoMetadata,
+    currentCard: storedCard,
+    force,
+    config,
+  })
+
+  await persistYoutubeSummaryToSnapshot(videoId, summaryState)
+
+  if (summaryState.summaryStatus === 'ready' && summaryState.summaryText.trim()) {
+    const metadataHash = buildYoutubeSummaryMetadataHash(videoMetadata)
+    await upsertYoutubeSummaryCache({
+      videoId,
+      metadataHash,
+      promptVersion: getYoutubeSummaryPromptVersion(),
+      provider: summaryState.summaryProvider || 'glm',
+      summaryText: summaryState.summaryText,
+      notebookSourceId: summaryState.notebookSourceId || null,
+      notebookId: summaryState.notebookId || null,
+      ttlMs: getYoutubeSummaryCacheTtlMs(),
+    })
+
+    return {
+      ...summaryState,
+      resultSummary: summaryState.summaryText,
+    }
+  }
+
+  const failure = new Error(summaryState.summaryError || '요약 생성에 실패했습니다.')
+  failure.code = 'summary_generation_failed'
+  failure.retryable = false
+  throw failure
+}
+
+const loadBookmarkItemByBookmarkId = async (bookmarkId) => {
+  const result = await query(
+    `
+      SELECT
+        id,
+        provider,
+        type,
+        native_id AS "nativeId",
+        title,
+        summary,
+        description,
+        url,
+        tags,
+        author,
+        language,
+        metrics,
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        saved_at AS "savedAt",
+        raw
+      FROM unified_items
+      WHERE provider = 'bookmark' AND native_id = $1
+      LIMIT 1
+    `,
+    [bookmarkId],
+  )
+
+  if (!result.rowCount) {
+    return null
+  }
+
+  return mapItemRowToBookmarkCard(result.rows[0])
+}
+
+const buildBookmarkSummaryColumnValue = (card) => {
+  const summaryText = String(card.summaryText || '').replace(/\s+/g, ' ').trim()
+  if (summaryText) {
+    return summaryText.length <= 220 ? summaryText : `${summaryText.slice(0, 217)}...`
+  }
+
+  const excerpt = String(card.excerpt || '').replace(/\s+/g, ' ').trim()
+  if (!excerpt) {
+    return '요약 정보가 없습니다.'
+  }
+
+  return excerpt.length <= 220 ? excerpt : `${excerpt.slice(0, 217)}...`
+}
+
+const persistBookmarkSummaryToSnapshot = async (bookmarkId, summaryPayload) => {
+  const existing = await loadBookmarkItemByBookmarkId(bookmarkId)
+  if (!existing) {
+    return null
+  }
+
+  const now = toIso(new Date())
+  const nextSummaryText =
+    typeof summaryPayload.summaryText === 'string' && summaryPayload.summaryText.trim()
+      ? summaryPayload.summaryText.trim()
+      : existing.summaryText
+
+  const nextCard = {
+    ...existing,
+    summaryText: nextSummaryText,
+    summaryStatus: resolveBookmarkSummaryStatus(summaryPayload.summaryStatus, nextSummaryText),
+    summaryProvider: resolveBookmarkSummaryProvider(summaryPayload.summaryProvider),
+    summaryUpdatedAt: summaryPayload.summaryUpdatedAt ? toIso(summaryPayload.summaryUpdatedAt) : now,
+    summaryError: summaryPayload.summaryError ? String(summaryPayload.summaryError) : null,
+    updatedAt: now,
+  }
+
+  const summaryColumnValue = buildBookmarkSummaryColumnValue(nextCard)
+
+  await query(
+    `
+      UPDATE unified_items
+      SET
+        summary = $1,
+        updated_at = $2::timestamptz,
+        raw = jsonb_set(COALESCE(raw, '{}'::jsonb), '{card}', $3::jsonb, true)
+      WHERE provider = 'bookmark' AND native_id = $4
+    `,
+    [summaryColumnValue, now, JSON.stringify(nextCard), bookmarkId],
+  )
+
+  return nextCard
+}
+
+const toBookmarkSummaryResponseFromCache = (cacheEntry) => {
+  const now = new Date().toISOString()
+  return {
+    summaryText: String(cacheEntry?.summaryText || ''),
+    summaryStatus: 'ready',
+    summaryUpdatedAt: cacheEntry?.generatedAt ? toIso(cacheEntry.generatedAt) : now,
+    summaryProvider: resolveBookmarkSummaryProvider(cacheEntry?.provider || 'glm'),
+    summaryError: null,
+  }
+}
+
+const toBookmarkSummaryResponseFromJob = (job, fallbackSummary = '') => {
+  const status = String(job?.status || '').toLowerCase()
+  if (status === 'queued' || status === 'running') {
+    return {
+      summaryText: fallbackSummary,
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+    }
+  }
+
+  if (status === 'failed' || status === 'dead') {
+    return {
+      summaryText: fallbackSummary,
+      summaryStatus: 'failed',
+      summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : new Date().toISOString(),
+      summaryProvider: 'glm',
+      summaryError: job?.errorMessage || '요약 생성에 실패했습니다.',
+    }
+  }
+
+  const summaryText = job?.resultSummary ? String(job.resultSummary) : fallbackSummary
+  return {
+    summaryText,
+    summaryStatus: summaryText ? 'ready' : 'idle',
+    summaryUpdatedAt: job?.updatedAt ? toIso(job.updatedAt) : null,
+    summaryProvider: summaryText ? 'glm' : 'none',
+    summaryError: null,
+  }
+}
+
+const processBookmarkSummaryJob = async (job) => {
+  const bookmarkId = String(job?.bookmarkId || job?.payload?.bookmarkId || '').trim()
+  if (!bookmarkId) {
+    const error = new Error('요약 작업의 bookmarkId가 비어 있습니다.')
+    error.status = 400
+    error.code = 'missing_bookmark_id'
+    throw error
+  }
+
+  const payload = job?.payload && typeof job.payload === 'object' ? job.payload : {}
+  const force = parseBoolean(payload.force, false)
+  const metadata = payload?.metadata && typeof payload.metadata === 'object' ? payload.metadata : null
+
+  const normalized = normalizeBookmarkUrl(bookmarkId)
+  if (!normalized) {
+    const error = new Error('유효한 bookmarkId가 아닙니다.')
+    error.status = 400
+    error.code = 'invalid_bookmark_id'
+    throw error
+  }
+
+  const storedCard = await loadBookmarkItemByBookmarkId(normalized.normalizedUrl)
+  if (!storedCard) {
+    const error = new Error('대시보드에 등록된 북마크 카드가 아닙니다.')
+    error.status = 404
+    error.code = 'bookmark_not_found'
+    throw error
+  }
+
+  const summaryState = await generateBookmarkSummaryState({
+    metadata: metadata || {
+      bookmarkId: normalized.normalizedUrl,
+      normalizedUrl: normalized.normalizedUrl,
+      title: storedCard.title,
+      excerpt: storedCard.excerpt,
+      domain: storedCard.domain,
+    },
+    currentCard: storedCard,
+    force,
+    config: resolveBookmarkSummaryConfig(process.env),
+  })
+
+  await persistBookmarkSummaryToSnapshot(normalized.normalizedUrl, summaryState)
+
+  if (summaryState.summaryStatus === 'ready' && summaryState.summaryText.trim()) {
+    const metadataHash = buildBookmarkSummaryMetadataHash(
+      metadata || {
+        bookmarkId: normalized.normalizedUrl,
+        normalizedUrl: normalized.normalizedUrl,
+        title: storedCard.title,
+        excerpt: storedCard.excerpt,
+        domain: storedCard.domain,
+      },
+    )
+
+    await upsertBookmarkSummaryCache({
+      bookmarkId: normalized.normalizedUrl,
+      metadataHash,
+      promptVersion: getBookmarkSummaryPromptVersion(),
+      provider: summaryState.summaryProvider || 'glm',
+      summaryText: summaryState.summaryText,
+      ttlMs: getBookmarkSummaryCacheTtlMs(),
+    })
+
+    return {
+      ...summaryState,
+      resultSummary: summaryState.summaryText,
+    }
+  }
+
+  const failure = new Error(summaryState.summaryError || '요약 생성에 실패했습니다.')
+  failure.code = 'summary_generation_failed'
+  failure.retryable = false
+  throw failure
+}
+
 const TRACKING_QUERY_KEY_SET = new Set(['fbclid', 'gclid'])
 const BLOCKED_HOSTNAME_SET = new Set(['localhost'])
 const BLOCKED_IPV6_SET = new Set(['::1'])
@@ -2032,6 +3043,181 @@ app.get('/api/health/deep', async (_req, res, next) => {
   }
 })
 
+app.post('/api/github/summaries/regenerate', requireAdminAuth, async (req, res, next) => {
+  try {
+    const repoIdRaw = typeof req.body?.repoId === 'string' ? req.body.repoId : ''
+    const parsed = parseGithubRepoId(repoIdRaw)
+    const force = parseBoolean(req.body?.force, false)
+
+    if (!parsed) {
+      const error = new Error('유효한 GitHub 저장소 ID(owner/repo)가 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const [repoMetadata, storedCard] = await Promise.all([
+      fetchGithubRepoMetadata(parsed.repoId),
+      loadGithubItemByRepoId(parsed.repoId),
+    ])
+
+    if (!storedCard) {
+      const error = new Error('대시보드에 등록된 GitHub 카드가 아닙니다.')
+      error.status = 404
+      throw error
+    }
+
+    const readme = await fetchGithubReadmePreview(repoMetadata.owner, repoMetadata.repo)
+    const metadataHash = buildGithubSummaryMetadataHash({
+      repoId: parsed.repoId,
+      description: repoMetadata.description,
+      readme,
+    })
+    const promptVersion = getGithubSummaryPromptVersion()
+    const summaryProvider = resolveGithubSummaryConfig(process.env).summaryProvider || 'glm'
+
+    if (!force) {
+      const cacheEntry = await getGithubSummaryCache({
+        repoId: parsed.repoId,
+        metadataHash,
+        promptVersion,
+        provider: summaryProvider,
+      })
+
+      if (cacheEntry) {
+        const summaryState = toGithubSummaryResponseFromCache(cacheEntry, storedCard.summary)
+        await persistGithubSummaryToSnapshot(parsed.repoId, summaryState)
+        res.json({
+          ok: true,
+          cached: true,
+          summaryJobStatus: 'succeeded',
+          ...summaryState,
+        })
+        return
+      }
+    }
+
+    const job = await enqueueGithubSummaryJob({
+      repoId: parsed.repoId,
+      metadataHash,
+      promptVersion,
+      force,
+      maxAttempts: getGithubSummaryMaxAttempts(),
+      payload: {
+        repoId: parsed.repoId,
+        force,
+        metadata: {
+          repoId: parsed.repoId,
+          fullName: repoMetadata.fullName,
+          description: repoMetadata.description,
+          readme,
+        },
+        requestedAt: new Date().toISOString(),
+      },
+    })
+
+    if (githubSummaryWorkerRuntime?.trigger) {
+      githubSummaryWorkerRuntime.trigger()
+    }
+
+    if (storedCard.summaryStatus === 'ready' && storedCard.summary && !force) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        summaryText: storedCard.summary,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: job.id,
+      summaryJobStatus: job.status,
+      summaryText: storedCard.summary || '',
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/github/summaries/status', async (req, res, next) => {
+  try {
+    const repoIdRaw = typeof req.query?.repoId === 'string' ? req.query.repoId : ''
+    const parsed = parseGithubRepoId(repoIdRaw)
+    if (!parsed) {
+      const error = new Error('유효한 GitHub 저장소 ID(owner/repo)가 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const [storedCard, job] = await Promise.all([
+      loadGithubItemByRepoId(parsed.repoId),
+      getLatestGithubSummaryJobByRepoId(parsed.repoId),
+    ])
+
+    if (!storedCard) {
+      const error = new Error('대시보드에 등록된 GitHub 카드가 아닙니다.')
+      error.status = 404
+      throw error
+    }
+
+    if (job && (job.status === 'queued' || job.status === 'running')) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        ...toGithubSummaryResponseFromJob(job, storedCard.summary || ''),
+      })
+      return
+    }
+
+    if (storedCard.summaryStatus === 'ready' && storedCard.summary) {
+      res.json({
+        ok: true,
+        jobId: job?.id || null,
+        summaryJobStatus: job?.status || 'succeeded',
+        summaryText: storedCard.summary,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+      })
+      return
+    }
+
+    if (job) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        ...toGithubSummaryResponseFromJob(job, storedCard.summary || ''),
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: null,
+      summaryJobStatus: 'idle',
+      summaryText: storedCard.summary || '',
+      summaryStatus: storedCard.summaryStatus || 'idle',
+      summaryUpdatedAt: storedCard.summaryUpdatedAt || null,
+      summaryProvider: storedCard.summaryProvider || 'none',
+      summaryError: storedCard.summaryError || null,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 app.get('/api/youtube/videos/:videoId', async (req, res, next) => {
   try {
     const { videoId } = req.params
@@ -2042,79 +3228,375 @@ app.get('/api/youtube/videos/:videoId', async (req, res, next) => {
       throw error
     }
 
-    if (!youtubeApiKey) {
-      const error = new Error('YOUTUBE_API_KEY가 설정되지 않았습니다.')
-      error.status = 503
-      throw error
-    }
-
-    const apiUrl = new URL('https://www.googleapis.com/youtube/v3/videos')
-    apiUrl.searchParams.set('part', 'snippet,statistics')
-    apiUrl.searchParams.set('id', videoId)
-    apiUrl.searchParams.set('key', youtubeApiKey)
-
-    let response
-    try {
-      response = await fetchWithTimeout(apiUrl.toString(), youtubeTimeoutMs)
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        const timeoutError = new Error('YouTube API 요청 시간이 초과되었습니다.')
-        timeoutError.status = 408
-        throw timeoutError
-      }
-      throw error
-    }
-
-    const payload = await response.json().catch(() => ({}))
-
-    if (!response.ok) {
-      const apiMessage = parseYoutubeErrorMessage(payload, 'YouTube API 요청에 실패했습니다.')
-      const lowerMessage = apiMessage.toLowerCase()
-
-      const failure = new Error(
-        lowerMessage.includes('quota')
-          ? 'YouTube API 요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.'
-          : `YouTube API 오류: ${apiMessage}`,
-      )
-      failure.status = response.status === 403 && lowerMessage.includes('quota') ? 403 : response.status
-      throw failure
-    }
-
-    const item = Array.isArray(payload.items) ? payload.items[0] : null
-    if (!item) {
-      const notFound = new Error('영상을 찾을 수 없습니다. URL을 확인해 주세요.')
-      notFound.status = 404
-      throw notFound
-    }
-
-    const snippet = item.snippet || {}
-    const statistics = item.statistics || {}
-    const thumbnails = snippet.thumbnails || {}
-    const thumbnailUrl =
-      thumbnails.maxres?.url ||
-      thumbnails.standard?.url ||
-      thumbnails.high?.url ||
-      thumbnails.medium?.url ||
-      thumbnails.default?.url ||
-      ''
+    const [video, storedCard] = await Promise.all([
+      fetchYoutubeVideoMetadata(videoId),
+      loadYoutubeItemByVideoId(videoId),
+    ])
 
     res.json({
       ok: true,
       video: {
-        videoId: String(item.id || videoId),
-        title: String(snippet.title || ''),
-        channelTitle: String(snippet.channelTitle || ''),
-        description: String(snippet.description || ''),
-        thumbnailUrl: String(thumbnailUrl),
-        publishedAt: toIso(snippet.publishedAt || new Date().toISOString()),
-        viewCount: Number(statistics.viewCount || 0),
-        likeCount:
-          typeof statistics.likeCount === 'string' || typeof statistics.likeCount === 'number'
-            ? Number(statistics.likeCount)
-            : null,
-        url: `https://www.youtube.com/watch?v=${String(item.id || videoId)}`,
-        updatedAt: toIso(snippet.publishedAt || new Date().toISOString()),
+        ...video,
+        summaryText: storedCard?.summaryText || '',
+        summaryStatus: storedCard?.summaryStatus || 'idle',
+        summaryUpdatedAt: storedCard?.summaryUpdatedAt || null,
+        summaryProvider: storedCard?.summaryProvider || 'none',
+        summaryError: storedCard?.summaryError || null,
+        notebookSourceStatus: storedCard?.notebookSourceStatus || 'disabled',
+        notebookSourceId: storedCard?.notebookSourceId || null,
+        notebookId: storedCard?.notebookId || null,
       },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/youtube/videos/:videoId/summarize', async (req, res, next) => {
+  try {
+    const { videoId } = req.params
+    const force = parseBoolean(req.body?.force, false)
+
+    if (!/^[a-zA-Z0-9_-]{6,20}$/.test(String(videoId || ''))) {
+      const error = new Error('유효한 YouTube 영상 ID가 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const [videoMetadata, storedCard] = await Promise.all([
+      fetchYoutubeVideoMetadata(videoId),
+      loadYoutubeItemByVideoId(videoId),
+    ])
+    const metadataHash = buildYoutubeSummaryMetadataHash(videoMetadata)
+    const promptVersion = getYoutubeSummaryPromptVersion()
+    const summaryProvider = resolveYoutubeSummaryConfig(process.env).summaryProvider || 'glm'
+
+    if (!force) {
+      const cacheEntry = await getYoutubeSummaryCache({
+        videoId,
+        metadataHash,
+        promptVersion,
+        provider: summaryProvider,
+      })
+
+      if (cacheEntry) {
+        const summaryState = toYoutubeSummaryResponseFromCache(cacheEntry)
+        await persistYoutubeSummaryToSnapshot(videoId, summaryState)
+        res.json({
+          ok: true,
+          cached: true,
+          summaryJobStatus: 'succeeded',
+          ...summaryState,
+        })
+        return
+      }
+    }
+
+    const job = await enqueueYoutubeSummaryJob({
+      videoId,
+      metadataHash,
+      promptVersion,
+      force,
+      maxAttempts: getYoutubeSummaryMaxAttempts(),
+      payload: {
+        videoId,
+        force,
+        metadata: videoMetadata,
+        requestedAt: new Date().toISOString(),
+      },
+    })
+
+    if (youtubeSummaryWorkerRuntime?.trigger) {
+      youtubeSummaryWorkerRuntime.trigger()
+    }
+
+    if (storedCard?.summaryStatus === 'ready' && storedCard?.summaryText && !force) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        summaryText: storedCard.summaryText,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+        notebookSourceStatus: storedCard.notebookSourceStatus || 'disabled',
+        notebookSourceId: storedCard.notebookSourceId || null,
+        notebookId: storedCard.notebookId || null,
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: job.id,
+      summaryJobStatus: job.status,
+      summaryText: '',
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+      notebookSourceStatus: 'disabled',
+      notebookSourceId: null,
+      notebookId: null,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/youtube/summaries/:videoId/status', async (req, res, next) => {
+  try {
+    const { videoId } = req.params
+
+    if (!/^[a-zA-Z0-9_-]{6,20}$/.test(String(videoId || ''))) {
+      const error = new Error('유효한 YouTube 영상 ID가 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const [storedCard, job] = await Promise.all([
+      loadYoutubeItemByVideoId(videoId),
+      getLatestYoutubeSummaryJobByVideoId(videoId),
+    ])
+
+    if (storedCard?.summaryStatus === 'ready' && storedCard?.summaryText) {
+      res.json({
+        ok: true,
+        jobId: job?.id || null,
+        summaryJobStatus: job?.status || 'succeeded',
+        summaryText: storedCard.summaryText,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+        notebookSourceStatus: storedCard.notebookSourceStatus || 'disabled',
+        notebookSourceId: storedCard.notebookSourceId || null,
+        notebookId: storedCard.notebookId || null,
+      })
+      return
+    }
+
+    if (job) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        ...toYoutubeSummaryResponseFromJob(job),
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: null,
+      summaryJobStatus: 'idle',
+      summaryText: '',
+      summaryStatus: storedCard?.summaryStatus || 'idle',
+      summaryUpdatedAt: storedCard?.summaryUpdatedAt || null,
+      summaryProvider: storedCard?.summaryProvider || 'none',
+      summaryError: storedCard?.summaryError || null,
+      notebookSourceStatus: storedCard?.notebookSourceStatus || 'disabled',
+      notebookSourceId: storedCard?.notebookSourceId || null,
+      notebookId: storedCard?.notebookId || null,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/youtube/summaries/:jobId/retry', async (req, res, next) => {
+  try {
+    const jobId = parsePositiveInt(req.params?.jobId, null, { min: 1 })
+    if (jobId === null) {
+      const error = new Error('유효한 jobId가 필요합니다.')
+      error.status = 400
+      throw error
+    }
+
+    const retried = await retryYoutubeSummaryJobById(jobId)
+    if (!retried) {
+      const error = new Error('재시도 가능한 요약 작업을 찾을 수 없습니다.')
+      error.status = 404
+      throw error
+    }
+
+    if (youtubeSummaryWorkerRuntime?.trigger) {
+      youtubeSummaryWorkerRuntime.trigger()
+    }
+
+    res.json({
+      ok: true,
+      job: retried,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.post('/api/bookmark/summaries/regenerate', requireAdminAuth, async (req, res, next) => {
+  try {
+    const bookmarkIdRaw = typeof req.body?.bookmarkId === 'string' ? req.body.bookmarkId : ''
+    const normalized = normalizeBookmarkUrl(bookmarkIdRaw)
+    const force = parseBoolean(req.body?.force, false)
+
+    if (!normalized) {
+      const error = new Error('유효한 북마크 URL이 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const storedCard = await loadBookmarkItemByBookmarkId(normalized.normalizedUrl)
+    if (!storedCard) {
+      const error = new Error('대시보드에 등록된 북마크 카드가 아닙니다.')
+      error.status = 404
+      throw error
+    }
+
+    const metadata = {
+      bookmarkId: normalized.normalizedUrl,
+      normalizedUrl: normalized.normalizedUrl,
+      title: storedCard.title,
+      excerpt: storedCard.excerpt,
+      domain: storedCard.domain,
+    }
+    const metadataHash = buildBookmarkSummaryMetadataHash(metadata)
+    const promptVersion = getBookmarkSummaryPromptVersion()
+    const summaryProvider = resolveBookmarkSummaryConfig(process.env).summaryProvider || 'glm'
+
+    if (!force) {
+      const cacheEntry = await getBookmarkSummaryCache({
+        bookmarkId: normalized.normalizedUrl,
+        metadataHash,
+        promptVersion,
+        provider: summaryProvider,
+      })
+
+      if (cacheEntry) {
+        const summaryState = toBookmarkSummaryResponseFromCache(cacheEntry)
+        await persistBookmarkSummaryToSnapshot(normalized.normalizedUrl, summaryState)
+        res.json({
+          ok: true,
+          cached: true,
+          summaryJobStatus: 'succeeded',
+          ...summaryState,
+        })
+        return
+      }
+    }
+
+    const job = await enqueueBookmarkSummaryJob({
+      bookmarkId: normalized.normalizedUrl,
+      metadataHash,
+      promptVersion,
+      force,
+      maxAttempts: getBookmarkSummaryMaxAttempts(),
+      payload: {
+        bookmarkId: normalized.normalizedUrl,
+        force,
+        metadata,
+        requestedAt: new Date().toISOString(),
+      },
+    })
+
+    if (bookmarkSummaryWorkerRuntime?.trigger) {
+      bookmarkSummaryWorkerRuntime.trigger()
+    }
+
+    if (storedCard.summaryStatus === 'ready' && storedCard.summaryText && !force) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        summaryText: storedCard.summaryText,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: job.id,
+      summaryJobStatus: job.status,
+      summaryText: storedCard.summaryText || '',
+      summaryStatus: 'queued',
+      summaryUpdatedAt: null,
+      summaryProvider: 'none',
+      summaryError: null,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/bookmark/summaries/status', async (req, res, next) => {
+  try {
+    const bookmarkIdRaw = typeof req.query?.bookmarkId === 'string' ? req.query.bookmarkId : ''
+    const normalized = normalizeBookmarkUrl(bookmarkIdRaw)
+
+    if (!normalized) {
+      const error = new Error('유효한 북마크 URL이 아닙니다.')
+      error.status = 400
+      throw error
+    }
+
+    const [storedCard, job] = await Promise.all([
+      loadBookmarkItemByBookmarkId(normalized.normalizedUrl),
+      getLatestBookmarkSummaryJobByBookmarkId(normalized.normalizedUrl),
+    ])
+
+    if (!storedCard) {
+      const error = new Error('대시보드에 등록된 북마크 카드가 아닙니다.')
+      error.status = 404
+      throw error
+    }
+
+    if (job && (job.status === 'queued' || job.status === 'running')) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        ...toBookmarkSummaryResponseFromJob(job, storedCard.summaryText || ''),
+      })
+      return
+    }
+
+    if (storedCard.summaryStatus === 'ready' && storedCard.summaryText) {
+      res.json({
+        ok: true,
+        jobId: job?.id || null,
+        summaryJobStatus: job?.status || 'succeeded',
+        summaryText: storedCard.summaryText,
+        summaryStatus: 'ready',
+        summaryUpdatedAt: storedCard.summaryUpdatedAt || storedCard.updatedAt || new Date().toISOString(),
+        summaryProvider: storedCard.summaryProvider || 'glm',
+        summaryError: null,
+      })
+      return
+    }
+
+    if (job) {
+      res.json({
+        ok: true,
+        jobId: job.id,
+        summaryJobStatus: job.status,
+        ...toBookmarkSummaryResponseFromJob(job, storedCard.summaryText || ''),
+      })
+      return
+    }
+
+    res.json({
+      ok: true,
+      jobId: null,
+      summaryJobStatus: 'idle',
+      summaryText: storedCard.summaryText || '',
+      summaryStatus: storedCard.summaryStatus || 'idle',
+      summaryUpdatedAt: storedCard.summaryUpdatedAt || null,
+      summaryProvider: storedCard.summaryProvider || 'none',
+      summaryError: storedCard.summaryError || null,
     })
   } catch (error) {
     next(error)
@@ -3038,6 +4520,55 @@ const start = async () => {
   app.listen(port, () => {
     console.log(`[server] listening on http://localhost:${port}`)
   })
+
+  youtubeSummaryWorkerRuntime = startYoutubeSummaryWorker({
+    workerId: `youtube-summary-worker-${process.pid}`,
+    processJob: processYoutubeSummaryJob,
+    onError: (error, job) => {
+      const label = job?.id ? `job=${job.id}` : 'job=none'
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[youtube-summary-worker] ${label} ${message}`)
+    },
+  })
+
+  githubSummaryWorkerRuntime = startGithubSummaryWorker({
+    workerId: `github-summary-worker-${process.pid}`,
+    processJob: processGithubSummaryJob,
+    onError: (error, job) => {
+      const label = job?.id ? `job=${job.id}` : 'job=none'
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[github-summary-worker] ${label} ${message}`)
+    },
+  })
+
+  bookmarkSummaryWorkerRuntime = startBookmarkSummaryWorker({
+    workerId: `bookmark-summary-worker-${process.pid}`,
+    processJob: processBookmarkSummaryJob,
+    onError: (error, job) => {
+      const label = job?.id ? `job=${job.id}` : 'job=none'
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[bookmark-summary-worker] ${label} ${message}`)
+    },
+  })
+
+  const stopWorker = () => {
+    if (youtubeSummaryWorkerRuntime?.stop) {
+      youtubeSummaryWorkerRuntime.stop()
+    }
+    youtubeSummaryWorkerRuntime = null
+
+    if (githubSummaryWorkerRuntime?.stop) {
+      githubSummaryWorkerRuntime.stop()
+    }
+    githubSummaryWorkerRuntime = null
+
+    if (bookmarkSummaryWorkerRuntime?.stop) {
+      bookmarkSummaryWorkerRuntime.stop()
+    }
+    bookmarkSummaryWorkerRuntime = null
+  }
+  process.once('SIGINT', stopWorker)
+  process.once('SIGTERM', stopWorker)
 }
 
 start().catch((error) => {

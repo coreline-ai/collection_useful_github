@@ -41,6 +41,14 @@ describe('youtube dashboardReducer', () => {
         publishedAt: '2026-01-01T00:00:00.000Z',
         viewCount: 1,
         likeCount: null,
+        summaryText: '',
+        summaryStatus: 'idle',
+        summaryUpdatedAt: null,
+        summaryProvider: 'none',
+        summaryError: null,
+        notebookSourceStatus: 'disabled',
+        notebookSourceId: null,
+        notebookId: null,
         addedAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-01T00:00:00.000Z',
       },
@@ -71,6 +79,14 @@ describe('youtube dashboardReducer', () => {
             publishedAt: '2026-01-01T00:00:00.000Z',
             viewCount: 1,
             likeCount: null,
+            summaryText: '',
+            summaryStatus: 'idle',
+            summaryUpdatedAt: null,
+            summaryProvider: 'none',
+            summaryError: null,
+            notebookSourceStatus: 'disabled',
+            notebookSourceId: null,
+            notebookId: null,
             addedAt: '2026-01-01T00:00:00.000Z',
             updatedAt: '2026-01-01T00:00:00.000Z',
           },
@@ -91,5 +107,61 @@ describe('youtube dashboardReducer', () => {
 
     expect(next.cards[0].categoryId).toBe('warehouse')
     expect(next.selectedCategoryId).toBe('main')
+  })
+
+  it('patches card summary fields', () => {
+    const hydrated = dashboardReducer(initialState(), {
+      type: 'hydrateDashboard',
+      payload: {
+        cards: [
+          {
+            id: 'dQw4w9WgXcQ',
+            videoId: 'dQw4w9WgXcQ',
+            categoryId: 'main',
+            title: 'Video',
+            channelTitle: 'Channel',
+            description: 'Desc',
+            thumbnailUrl: 'https://img',
+            videoUrl: 'https://youtube.com/watch?v=dQw4w9WgXcQ',
+            publishedAt: '2026-01-01T00:00:00.000Z',
+            viewCount: 1,
+            likeCount: null,
+            summaryText: '',
+            summaryStatus: 'idle',
+            summaryUpdatedAt: null,
+            summaryProvider: 'none',
+            summaryError: null,
+            notebookSourceStatus: 'disabled',
+            notebookSourceId: null,
+            notebookId: null,
+            addedAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        categories: [
+          { id: 'main', name: '메인', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+          { id: 'warehouse', name: '창고', isSystem: true, createdAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        selectedCategoryId: 'main',
+      },
+    })
+
+    const next = dashboardReducer(hydrated, {
+      type: 'patchCard',
+      payload: {
+        videoId: 'dQw4w9WgXcQ',
+        patch: {
+          summaryText: '요약 텍스트',
+          summaryStatus: 'ready',
+          summaryProvider: 'glm',
+          summaryUpdatedAt: '2026-01-02T00:00:00.000Z',
+          summaryError: null,
+        },
+      },
+    })
+
+    expect(next.cards[0].summaryStatus).toBe('ready')
+    expect(next.cards[0].summaryText).toBe('요약 텍스트')
+    expect(next.cards[0].summaryProvider).toBe('glm')
   })
 })

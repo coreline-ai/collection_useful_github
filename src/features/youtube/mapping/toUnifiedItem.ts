@@ -15,6 +15,8 @@ const buildSummary = (description: string): string => {
 
 export const toYoutubeUnifiedItem = (card: YouTubeVideoCard, sortIndex: number): UnifiedItem => {
   const normalizedVideoId = card.videoId || card.id
+  const summaryText = typeof card.summaryText === 'string' ? card.summaryText.trim() : ''
+  const resolvedSummary = summaryText || buildSummary(card.description)
 
   return {
     id: `youtube:${normalizedVideoId}`,
@@ -22,7 +24,7 @@ export const toYoutubeUnifiedItem = (card: YouTubeVideoCard, sortIndex: number):
     type: 'video',
     nativeId: normalizedVideoId,
     title: card.title,
-    summary: buildSummary(card.description),
+    summary: resolvedSummary,
     description: card.description,
     url: card.videoUrl,
     tags: [],

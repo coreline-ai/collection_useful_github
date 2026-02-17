@@ -7,26 +7,46 @@ vi.mock('@features/github/services/github', () => ({
   fetchRepo: vi.fn(),
   fetchRepoDetail: vi.fn(),
   fetchLatestCommitSha: vi.fn(),
+  regenerateGithubSummary: vi.fn(),
+  fetchGithubSummaryStatus: vi.fn(),
 }))
 
 vi.mock('@features/youtube/services/youtube', () => ({
   parseYouTubeVideoUrl: vi.fn(),
   fetchYouTubeVideo: vi.fn(),
+  summarizeYouTubeVideo: vi.fn(),
   buildYouTubeSummary: vi.fn((value: string) => value),
 }))
 
 vi.mock('@features/bookmark/services/bookmark', () => ({
   parseBookmarkUrl: vi.fn(),
   fetchBookmarkMetadata: vi.fn(),
+  regenerateBookmarkSummary: vi.fn(),
+  fetchBookmarkSummaryStatus: vi.fn(),
   createBookmarkCardFromDraft: vi.fn(
     (
       draft: Omit<
         BookmarkCard,
-        'categoryId' | 'addedAt' | 'linkStatus' | 'lastCheckedAt' | 'lastStatusCode' | 'lastResolvedUrl'
+        | 'categoryId'
+        | 'summaryText'
+        | 'summaryStatus'
+        | 'summaryProvider'
+        | 'summaryUpdatedAt'
+        | 'summaryError'
+        | 'addedAt'
+        | 'linkStatus'
+        | 'lastCheckedAt'
+        | 'lastStatusCode'
+        | 'lastResolvedUrl'
       >,
     ) => ({
     ...draft,
     categoryId: 'main',
+    summaryText: '',
+    summaryStatus: 'idle',
+    summaryProvider: 'none',
+    summaryUpdatedAt: null,
+    summaryError: null,
     addedAt: '2026-02-15T00:00:00.000Z',
     linkStatus: 'unknown',
     lastCheckedAt: null,

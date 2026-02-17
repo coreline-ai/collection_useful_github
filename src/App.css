@@ -444,6 +444,21 @@
   font-size: 0.84rem;
 }
 
+.global-warning-banner {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 1rem;
+  background: var(--color-warning-bg);
+}
+
+.global-warning-banner p {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-warning-text);
+}
+
 .hero {
   margin-bottom: 1.8rem;
   color: var(--text-main);
@@ -708,6 +723,104 @@
   text-overflow: ellipsis;
 }
 
+.github-summary-tooltip-wrap {
+  position: relative;
+}
+
+.github-summary-tooltip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  z-index: 30;
+  padding: 0.58rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-elevated);
+  color: var(--text-main);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  box-shadow: var(--color-shadow-1);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  white-space: normal;
+}
+
+.github-summary-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 0.95rem;
+  top: 100%;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-right: 1px solid var(--color-border-strong);
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-surface-elevated);
+  transform: translateY(-0.33rem) rotate(45deg);
+}
+
+.github-summary-tooltip-wrap:hover .github-summary-tooltip,
+.github-summary-tooltip-wrap:focus-within .github-summary-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.repo-summary-controls {
+  margin-top: -0.3rem;
+  margin-bottom: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.repo-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 0.14rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-subtle);
+  background: var(--color-surface-1);
+}
+
+.repo-summary-badge.summary-ready {
+  color: #0e8a43;
+}
+
+.repo-summary-badge.summary-failed {
+  color: var(--color-danger);
+}
+
+.repo-summary-badge.summary-queued {
+  color: var(--color-accent);
+}
+
+.repo-summary-refresh {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--text-main);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+}
+
+.repo-summary-refresh:disabled {
+  opacity: 0.6;
+}
+
+.repo-summary-error {
+  margin: -0.15rem 0 0.45rem;
+  color: var(--color-danger);
+  font-size: 0.72rem;
+}
+
 .repo-meta-line {
   display: flex;
   justify-content: space-between;
@@ -818,6 +931,113 @@
 
 .bookmark-excerpt {
   -webkit-line-clamp: 3;
+}
+
+.bookmark-summary-panel {
+  margin-top: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-2);
+  padding: 0.58rem 0.62rem;
+}
+
+.bookmark-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.bookmark-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-subtle);
+  background: var(--color-surface-1);
+}
+
+.bookmark-summary-badge.summary-ready {
+  color: #0e8a43;
+}
+
+.bookmark-summary-badge.summary-failed {
+  color: var(--color-danger);
+}
+
+.bookmark-summary-badge.summary-queued {
+  color: var(--color-accent);
+}
+
+.bookmark-summary-retry {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--text-main);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+}
+
+.bookmark-summary-retry:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.bookmark-summary-tooltip-wrap {
+  position: relative;
+}
+
+.bookmark-summary-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.38rem);
+  z-index: 20;
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - 2.4rem));
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-surface-elevated);
+  color: var(--text-main);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.bookmark-summary-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 14px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid var(--color-border-strong);
+  border-right: 1px solid var(--color-border-strong);
+}
+
+.bookmark-summary-tooltip-wrap:hover .bookmark-summary-tooltip,
+.bookmark-summary-tooltip-wrap:focus-within .bookmark-summary-tooltip,
+.bookmark-summary-tooltip-wrap.is-open .bookmark-summary-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.bookmark-summary-error {
+  margin-top: 0.38rem;
+  font-size: 0.72rem;
+  color: var(--color-danger);
 }
 
 .bookmark-meta-badge {
@@ -954,6 +1174,121 @@
 
 .youtube-meta-line {
   margin-top: 0.75rem;
+}
+
+.youtube-summary-panel {
+  margin-top: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface-2);
+  padding: 0.58rem 0.62rem;
+}
+
+.youtube-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.youtube-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 0.16rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-subtle);
+  background: var(--color-surface-1);
+}
+
+.youtube-summary-badge.summary-ready {
+  color: #0e8a43;
+}
+
+.youtube-summary-badge.summary-failed {
+  color: var(--color-danger);
+}
+
+.youtube-summary-badge.summary-queued {
+  color: var(--color-accent);
+}
+
+.youtube-summary-retry {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-1);
+  color: var(--text-main);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+}
+
+.youtube-summary {
+  margin-top: 0.45rem;
+  -webkit-line-clamp: 3;
+  color: var(--text-main);
+}
+
+.youtube-summary-tooltip-wrap {
+  position: relative;
+}
+
+.youtube-summary-tooltip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 0.38rem);
+  z-index: 20;
+  min-width: 220px;
+  max-width: min(420px, calc(100vw - 2.4rem));
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-surface-elevated);
+  color: var(--text-main);
+  padding: 0.5rem 0.6rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+  white-space: normal;
+  opacity: 0;
+  transform: translateY(4px);
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.youtube-summary-tooltip::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 14px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  background: var(--color-surface-elevated);
+  border-bottom: 1px solid var(--color-border-strong);
+  border-right: 1px solid var(--color-border-strong);
+}
+
+.youtube-summary-tooltip-wrap:hover .youtube-summary-tooltip,
+.youtube-summary-tooltip-wrap:focus-within .youtube-summary-tooltip,
+.youtube-summary-tooltip-wrap.is-open .youtube-summary-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .bookmark-excerpt,
+  .youtube-summary {
+    cursor: pointer;
+  }
+}
+
+.youtube-summary-error {
+  margin-top: 0.38rem;
+  font-size: 0.72rem;
+  color: var(--color-danger);
 }
 
 .pagination {

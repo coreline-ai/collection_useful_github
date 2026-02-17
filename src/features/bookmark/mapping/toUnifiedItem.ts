@@ -2,6 +2,7 @@ import type { BookmarkCard, UnifiedItem } from '@shared/types'
 
 export const toBookmarkUnifiedItem = (card: BookmarkCard, sortIndex: number): UnifiedItem => {
   const normalizedUrl = card.normalizedUrl.trim()
+  const summary = card.summaryText.trim() || card.excerpt
 
   return {
     id: `bookmark:${normalizedUrl}`,
@@ -9,8 +10,8 @@ export const toBookmarkUnifiedItem = (card: BookmarkCard, sortIndex: number): Un
     type: 'bookmark',
     nativeId: normalizedUrl,
     title: card.title,
-    summary: card.excerpt,
-    description: card.excerpt,
+    summary,
+    description: summary,
     url: card.url,
     tags: card.tags,
     author: card.domain,
@@ -25,6 +26,11 @@ export const toBookmarkUnifiedItem = (card: BookmarkCard, sortIndex: number): Un
       categoryId: card.categoryId,
       sortIndex,
       metadataStatus: card.metadataStatus,
+      summaryText: card.summaryText,
+      summaryStatus: card.summaryStatus,
+      summaryProvider: card.summaryProvider,
+      summaryUpdatedAt: card.summaryUpdatedAt,
+      summaryError: card.summaryError,
       linkStatus: card.linkStatus,
       lastCheckedAt: card.lastCheckedAt,
       lastStatusCode: card.lastStatusCode,

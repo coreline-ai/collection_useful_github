@@ -45,6 +45,10 @@ const createCard = (index: number, categoryId = DEFAULT_MAIN_CATEGORY_ID): GitHu
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   addedAt: new Date().toISOString(),
+  summaryStatus: 'ready',
+  summaryProvider: 'none',
+  summaryUpdatedAt: null,
+  summaryError: null,
 })
 
 const createState = (cards: GitHubRepoCard[]): DashboardState => ({
@@ -165,5 +169,27 @@ describe('dashboardReducer', () => {
 
     const warehouseCards = result.cards.filter((card) => card.categoryId === DEFAULT_WAREHOUSE_CATEGORY_ID)
     expect(warehouseCards.map((card) => card.id)).toEqual(['owner/repo-2', 'owner/repo-4', 'owner/repo-3'])
+  })
+
+  it('patches summary fields on a single card only', () => {
+    const state = createState([createCard(1), createCard(2)])
+    const result = dashboardReducer(state, {
+      type: 'patchCardSummary',
+      payload: {
+        repoId: 'owner/repo-1',
+        patch: {
+          summary: '새 요약',
+          summaryStatus: 'ready',
+          summaryProvider: 'glm',
+          summaryUpdatedAt: '2026-02-17T00:00:00.000Z',
+          summaryError: null,
+        },
+      },
+    })
+
+    expect(result.cards[0].summary).toBe('새 요약')
+    expect(result.cards[0].summaryProvider).toBe('glm')
+    expect(result.cards[1].summary).toBe('summary')
+    expect(result.cards[1].summaryProvider).toBe('none')
   })
 })

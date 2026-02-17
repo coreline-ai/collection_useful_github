@@ -1,7 +1,10 @@
 import { DEFAULT_MAIN_CATEGORY_ID } from '@constants'
 import type { BookmarkCard } from '@shared/types'
 import {
+  fetchBookmarkSummaryStatus as fetchBookmarkSummaryStatusFromRemote,
   fetchBookmarkMetadata as fetchBookmarkMetadataFromRemote,
+  regenerateBookmarkSummary as regenerateBookmarkSummaryFromRemote,
+  type BookmarkSummaryApiResult,
   type BookmarkCardDraft,
 } from '@core/data/adapters/remoteDb'
 
@@ -84,9 +87,39 @@ export const fetchBookmarkMetadata = async (url: string): Promise<BookmarkCardDr
   return fetchBookmarkMetadataFromRemote(url)
 }
 
+export type { BookmarkSummaryApiResult }
+
+export const regenerateBookmarkSummary = async (
+  bookmarkId: string,
+  options: { force?: boolean } = {},
+): Promise<BookmarkSummaryApiResult> => {
+  try {
+    return await regenerateBookmarkSummaryFromRemote(bookmarkId, options)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '북마크 요약 생성 요청에 실패했습니다.'
+    throw new Error(message)
+  }
+}
+
+export const fetchBookmarkSummaryStatus = async (
+  bookmarkId: string,
+): Promise<BookmarkSummaryApiResult> => {
+  try {
+    return await fetchBookmarkSummaryStatusFromRemote(bookmarkId)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '북마크 요약 상태 조회에 실패했습니다.'
+    throw new Error(message)
+  }
+}
+
 export const createBookmarkCardFromDraft = (draft: BookmarkCardDraft): BookmarkCard => ({
   ...draft,
   categoryId: DEFAULT_MAIN_CATEGORY_ID,
+  summaryText: '',
+  summaryStatus: 'idle',
+  summaryProvider: 'none',
+  summaryUpdatedAt: null,
+  summaryError: null,
   addedAt: new Date().toISOString(),
   linkStatus: 'unknown',
   lastCheckedAt: null,

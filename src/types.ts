@@ -35,6 +35,10 @@ export type GitHubRepoCard = {
   createdAt: string
   updatedAt: string
   addedAt: string
+  summaryStatus?: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryProvider?: 'glm' | 'none'
+  summaryUpdatedAt?: string | null
+  summaryError?: string | null
 }
 
 export type RepoNote = {
@@ -89,6 +93,14 @@ export type YouTubeVideoCard = {
   publishedAt: string
   viewCount: number
   likeCount: number | null
+  summaryText: string
+  summaryStatus: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryUpdatedAt: string | null
+  summaryProvider: 'glm' | 'none'
+  summaryError: string | null
+  notebookSourceStatus: 'disabled' | 'queued' | 'linked' | 'failed'
+  notebookSourceId: string | null
+  notebookId: string | null
   addedAt: string
   updatedAt: string
 }
@@ -118,6 +130,11 @@ export type BookmarkCard = {
   domain: string
   title: string
   excerpt: string
+  summaryText: string
+  summaryStatus: 'idle' | 'queued' | 'ready' | 'failed'
+  summaryProvider: 'glm' | 'none'
+  summaryUpdatedAt: string | null
+  summaryError: string | null
   thumbnailUrl: string | null
   faviconUrl: string | null
   tags: string[]
