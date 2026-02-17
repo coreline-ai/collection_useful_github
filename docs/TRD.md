@@ -1,67 +1,77 @@
 # TRD: Unified Knowledge Cardboard
 
-업데이트 기준: 2026-02-16
+업데이트 기준: 2026-02-17
 
 ## 관련 문서
 
 - [WEBAPP ESSENTIAL CHECKLIST + 실행 계획](./WEBAPP_ESSENTIAL_CHECKLIST_PLAN.md)
+- [PRD](./PRD.md)
 
 ## 1. 기술 스택
 
 - Frontend: React 19, TypeScript, Vite 7
-- Backend: Node.js(ESM) + Express 4
+- Backend: Node.js(ESM), Express 4
 - Database: PostgreSQL 16 (`pg`)
-- Testing: Vitest + Testing Library + Postgres E2E
+- Test: Vitest + Testing Library + Postgres E2E
 
-## 2. 시스템 구성
+## 2. 시스템 아키텍처
 
-- UI Shell: `src/app/AppShell.tsx`
+## 2.1 Frontend
+
+- App Shell: `src/app/AppShell.tsx`
 - Feature Modules:
+  - `src/features/unified-search`
   - `src/features/github`
   - `src/features/youtube`
   - `src/features/bookmark`
-  - `src/features/unified-search`
-- Core Data Adapter: `src/core/data/adapters/remoteDb.ts`
-- API Server: `server/src/index.js`
-- DB Schema: `server/db/schema.sql`
+- Data Adapter: `src/core/data/adapters/remoteDb.ts`
+- Local Storage Adapter: `src/shared/storage/localStorage.ts`
 
-## 3. 코드 레벨 구조
+## 2.2 Backend
 
-## 3.1 AppShell 레이어
+- API: `server/src/index.js`
+- Summary Services:
+  - GitHub: `server/src/services/githubSummary*.js`
+  - YouTube: `server/src/services/youtubeSummary*.js`
+  - Bookmark: `server/src/services/bookmarkSummary*.js`
+- NotebookLM Adapter: `server/src/services/notebooklm*.js`
+- Schema: `server/db/schema.sql`
 
-책임:
+## 3. 모듈 경계 원칙
 
-- 탭 전환 상태(`TopSection`) 관리
-- 테마 상태(`ThemeMode`) 관리
-- 초기 데이터 마이그레이션 실행
-- feature 별 sync badge 상태 연결
+- AppShell은 탭/테마/초기화/공통 상태 표시만 담당
+- 카드 도메인 로직은 각 feature entry 내부에서 캡슐화
+- provider 간 직접 참조 최소화, 공통 계약은 `types/core adapter`로 연결
 
-비책임:
+## 4. 상태/동기화 설계
 
-- 카드 추가/삭제/검색 로직
-- provider별 상세 상태 관리
+## 4.1 Feature Entry 공통 패턴
 
-## 3.2 Feature Entry 패턴
+- `useReducer` 기반 상태 관리
+- 원격 hydrate 성공 시 원격 기준 스냅샷 사용
+- 저장 시 원격 우선, 네트워크 오류 시 로컬 fallback
+- 복구 루프 기반 자동 재연결
 
-각 Entry(`github/youtube/bookmark`)는 동일 패턴을 가진다.
-
-- `useReducer`로 대시보드 상태 관리
-- `remoteEnabled` 시 원격 hydrate 실행
-- 저장 시 원격 우선, 실패 시 localStorage fallback
-- transient 실패 누적 후 `local` 전환
-- 주기적 자동 복구(recovery loop)
-
-공통 상수(`src/constants.ts`):
+핵심 상수(`src/constants.ts`):
 
 - `REMOTE_SYNC_NETWORK_FAILURES_BEFORE_FALLBACK = 3`
 - `REMOTE_SYNC_RECOVERY_INTERVAL_MS = 10000`
 - `REMOTE_SYNC_RECOVERED_BADGE_MS = 4000`
 
-## 3.3 상태 모델
+## 4.2 동기화 상태
+
+- `healthy`
+- `retrying`
+- `local`
+- `recovered`
+
+상태 배지는 AppShell 상단에 노출되며 마지막 성공 시각을 함께 표시한다.
+
+## 5. 데이터 모델
 
 타입 파일: `src/types.ts`
 
-핵심 타입:
+핵심 모델:
 
 - `GitHubRepoCard`
 - `YouTubeVideoCard`
@@ -70,164 +80,162 @@
 - `UnifiedItem`
 - `SyncConnectionStatus`
 
-`BookmarkCard` 추가 필드:
+요약 관련 공통 상태 필드:
 
-- `metadataStatus`: 메타 추출 신뢰도
-- `linkStatus`, `lastCheckedAt`, `lastStatusCode`, `lastResolvedUrl`: 링크 점검 결과 저장용
+- `summaryText`
+- `summaryStatus` (`idle|queued|ready|failed`)
+- `summaryProvider` (`glm|none`)
+- `summaryUpdatedAt`
+- `summaryError`
 
-## 3.4 통합 데이터 계층
+## 6. DB 스키마
 
-저장 대상 테이블:
+파일: `server/db/schema.sql`
+
+## 6.1 기본 테이블
 
 - `unified_items`
 - `unified_notes`
 - `unified_meta`
+- `github_dashboard_history`
 
-보드별 대시보드 API:
+## 6.2 요약 큐/캐시 테이블
+
+- `github_summary_jobs`
+- `github_summary_cache`
+- `youtube_summary_jobs`
+- `youtube_summary_cache`
+- `bookmark_summary_jobs`
+- `bookmark_summary_cache`
+
+## 6.3 인덱스/검색 확장
+
+- extension: `pg_trgm`, `unaccent`
+- trigram GIN(lower title/summary/description/author/native_id)
+- FTS GIN(weighted tsvector)
+- provider/type/status/updated_at 보조 인덱스
+
+## 7. API 설계
+
+## 7.1 공통
+
+- `GET /api/health`
+- `GET /api/health/deep`
+- `GET /api/search`
+- `GET /api/admin/export`
+- `POST /api/admin/import`
+
+## 7.2 Dashboard
 
 - `GET/PUT /api/github/dashboard`
 - `GET/PUT /api/youtube/dashboard`
 - `GET/PUT /api/bookmark/dashboard`
 
-Legacy 호환 API:
+## 7.3 Summary
 
+- GitHub:
+  - `POST /api/github/summaries/regenerate`
+  - `GET /api/github/summaries/status?repoId=...`
+- YouTube:
+  - `POST /api/youtube/videos/:videoId/summarize`
+  - `GET /api/youtube/summaries/:videoId/status`
+  - `POST /api/youtube/summaries/:jobId/retry`
+- Bookmark:
+  - `POST /api/bookmark/summaries/regenerate`
+  - `GET /api/bookmark/summaries/status?bookmarkId=...`
+
+## 7.4 Metadata/Utility
+
+- `GET /api/youtube/videos/:videoId`
+- `GET /api/bookmark/metadata?url=...`
+- `GET /api/bookmark/link-check?url=...`
 - `PUT /api/providers/:provider/snapshot`
 - `GET /api/providers/:provider/items`
 - `GET /api/items/:id`
 
-## 4. PostgreSQL 스키마/인덱스
-
-파일: `server/db/schema.sql`
-
-확장:
-
-- `pg_trgm`
-- `unaccent`
-
-테이블:
-
-- `unified_items`: 통합 콘텐츠 본문
-- `unified_notes`: 노트
-- `unified_meta`: 대시보드/메타
-
-검색 인덱스:
-
-- trigram GIN: `title/summary/description/author/native_id(lower)`
-- FTS GIN: 가중치 결합 `title/native_id(A), summary/author(B), description/tags(C)`
-- 보조 정렬 인덱스: provider/type/status + updated_at
-
-## 5. 검색 엔진 설계
+## 8. 검색 엔진 상세
 
 엔드포인트: `GET /api/search`
 
 모드:
 
-- `legacy`: ILIKE 기반
+- `legacy`: 단순 ILIKE 계열
 - `relevance`(기본): 하이브리드 랭킹
 
 신호:
 
 - exact
 - prefix
-- fts
-- trgm
-- recency
+- fts (`tsvector`, `websearch_to_tsquery`)
+- trgm (`similarity`, `word_similarity`)
+- recency boost
 
-랭킹 수식:
+대표 수식:
 
 ```text
-score = exact*5.0 + prefix*2.5 + fts_rank*1.8 + trgm_similarity*1.2 + recency*0.4
+score = exact*5.0 + prefix*2.5 + fts*1.8 + trgm*1.2 + recency*0.4
 ```
 
-옵션 파라미터:
+서버 보호:
 
-- `provider`, `type`, `limit`
-- `mode`, `fuzzy`, `prefix`, `min_score`
+- rate limit: IP 기준 60 req / 60 sec
 
-rate limit:
+클라이언트 최적화:
 
-- IP 기준 `60 req / 60 sec`
+- 최근검색 localStorage(최대 20개)
+- 결과 캐시 메모리 TTL 60초 + LRU 50개
 
-클라이언트 최적화(`useUnifiedSearchState`):
-
-- 최근검색 localStorage(최대 20)
-- 결과 캐시 Map TTL 60초 + LRU 50개
-
-## 6. Bookmark 메타 추출 설계
+## 9. 북마크 메타 추출/보안
 
 엔드포인트:
 
-- `GET /api/bookmark/metadata?url=...`
-- `GET /api/bookmark/link-check?url=...`
+- `GET /api/bookmark/metadata`
+- `GET /api/bookmark/link-check`
 
 보안/안정성:
 
 - URL 스킴 검증(`http/https`)
-- 자격증명 포함 URL 거부
-- localhost/private 대역 차단(SSRF 방어)
+- credential 포함 URL 거부
+- localhost/private 대역 차단(SSRF)
 - redirect 최대 3회
-- timeout/응답 바이트 제한
-- non-html fallback
+- timeout + 최대 바이트 제한
+- 비HTML 응답 fallback 처리
 
-추출 우선순위:
+## 10. 요약 파이프라인
 
-- title: og > twitter > title
-- excerpt: og desc > meta desc > first paragraph
-- canonical/image/URL 정규화
+요약 생성(3 provider 공통):
 
-## 7. YouTube 메타 설계
+- 큐 기반 비동기 처리
+- 상태 전이: `queued -> running -> succeeded/failed`
+- 실패 시 기존 카드 텍스트 보존
+- 성공 시 `unified_items.summary` + `raw.card.summary*` 동시 갱신
 
-엔드포인트:
+입력 원문:
 
-- `GET /api/youtube/videos/:videoId`
-- `POST /api/youtube/videos/:videoId/summarize`
+- GitHub: description + README(최대 바이트 제한)
+- YouTube: title/channel/description/metrics
+- Bookmark: title/excerpt/domain/url 메타 기반
 
-동작:
+## 11. 테스트 전략
 
-- YouTube Data API v3 `videos?part=snippet,statistics`
-- quota/timeout/not found 메시지 분기
-- `thumbnail`, `viewCount`, `likeCount` 매핑
-- 요약 파이프라인:
-  - 입력: `title + channelTitle + description + publishedAt + viewCount`
-  - 엔진: GLM (`YOUTUBE_SUMMARY_PROVIDER=glm`)
-  - 결과: 한국어 3문장/220자 이내 정제
-  - 재시도: 실패 시 1회 백오프 재시도
-  - 저장: `unified_items.summary` + `raw.card.summary*` 필드 동시 반영
-- NotebookLM:
-  - `NOTEBOOKLM_ENABLED=false` 기본
-  - `true`일 때 NotebookLM REST(`sources list / batchCreate`) 실제 호출
-  - 인증: 서비스 계정(JSON 문자열/파일 경로/base64 JSON) 또는 ADC
-  - endpoint: `${NOTEBOOKLM_ENDPOINT_LOCATION}-discoveryengine.googleapis.com`
-  - 실패 시 source 상태만 `failed`, 카드 저장/요약 흐름은 유지
+- 단위: reducer/parser/mapping/storage/services
+- 통합: AppShell/각 feature 주요 사용자 플로우
+- Postgres E2E: 저장-복원-검색 라운드트립
 
-## 8. 번역 설계
+명령:
 
-파일: `src/services/translation.ts`
+- `npm run lint`
+- `npm test`
+- `npm run build`
+- `npm run test:e2e:postgres`
 
-정책:
+## 12. 운영 리스크 및 대응
 
-- 자동 번역 없음, 버튼 트리거 수동 번역만
-- GLM 우선, OpenAI fallback
-- 배치 번역(JSON 응답 파싱)
-- markdown 번역 시 구조 보존 지시
-
-## 9. 테스트 전략
-
-단위/통합:
-
-- reducers, parsers, mapping, storage, markdown, theme
-- App/AppShell 탭 전환 및 회귀
-- unified-search state/cache/recent queries
-
-Postgres E2E:
-
-- `src/app/postgres*.e2e.test.ts(x)`
-- 실행 스크립트: `npm run test:e2e:postgres`
-- 전용 DB/포트 가드로 메인 DB 오염 방지
-
-## 10. 운영 리스크와 대응
-
-- CORS 불일치: `CORS_ORIGIN` 다중 포트 허용
-- 원격 장애: local fallback + recovered 배지
-- 검색 부하: SQL 인덱스 + API rate limit
-- 북마크 크롤링 리스크: timeout/byte limit/SSRF 차단
+- 포트 충돌/구버전 서버 잔존:
+  - `dev:all`에서 4000 포트 기존 서버 정리 후 재기동
+- 원격 연결 장애:
+  - 재시도 후 로컬 전환, 복구 루프로 정상화
+- 요약 재생성 404:
+  - API base URL/서버 버전/카드 등록 상태 점검
+- YouTube quota/외부 API 장애:
+  - 카드 저장 흐름과 요약 실패를 분리 처리
