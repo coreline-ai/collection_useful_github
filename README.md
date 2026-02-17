@@ -1,4 +1,4 @@
-# Useful Git Youtube Bookmark Info
+# Useful Git YouTube Bookmark Info
 
 <p align="left">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
@@ -25,6 +25,28 @@ GitHub, YouTube, Bookmark를 카드보드로 관리하고, PostgreSQL 기반 통
 - 저장소는 PostgreSQL `unified_items / unified_notes / unified_meta`를 기준으로 동작
 - 원격 저장 실패 시 복구형 동기화 전략(`healthy/retrying/local/recovered`) 적용
 - 통합검색은 PostgreSQL 하이브리드 랭킹(FTS + Prefix + Trigram + 최신성 보정)
+
+## 1.1 최근 추가 기능 상세
+
+- GitHub 요약 재생성(수동):
+  - 카드 하단 `요약 재생성` 버튼 추가
+  - 서버 비동기 큐(`github_summary_jobs`) 기반 처리
+  - 성공 시 카드 `summary` 즉시 교체, 실패 시 기존 summary 유지
+- YouTube 요약 고도화:
+  - 요약 상태(`idle/queued/ready/failed`) 배지 + 재생성 동작
+  - 요약 결과 툴팁/상태 반영 강화
+  - NotebookLM source 연동 포인트(`NOTEBOOKLM_ENABLED`) 유지
+- Bookmark 요약 재생성:
+  - 카드 하단에서 수동 재생성
+  - 서버 비동기 큐(`bookmark_summary_jobs`) + 캐시(`bookmark_summary_cache`)
+  - 완료 시 카드 본문을 `summaryText`로 대체, 실패 시 excerpt 보존
+- 동기화/운영 안정화:
+  - 상단 동기화 상태 배지 + 마지막 성공 시각 표시
+  - `dev:all` 실행 시 4000 포트 기존 서버 자동 정리
+  - 요약 404 오류 메시지 정밀화(라우트 미존재 vs 카드 미등록 구분)
+- 운영 API 확장:
+  - GitHub 대시보드 이력 조회/롤백 API 추가
+  - 백업 내보내기/복원 경로 유지 및 테스트 커버리지 강화
 
 ## 2. 주요 기능
 
