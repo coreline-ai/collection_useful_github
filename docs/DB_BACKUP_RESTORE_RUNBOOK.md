@@ -9,9 +9,9 @@
 
 ## 사전 조건
 
-- PostgreSQL 접근 가능한 환경
+- PostgreSQL 접근 가능 환경
 - `server/.env` 또는 DB 접속 환경 변수 설정
-- `pg_dump`, `psql`, `gzip` 설치
+- `pg_dump`, `psql`, `gzip`, `gunzip` 설치
 
 ## 1) 백업
 
@@ -37,7 +37,22 @@ npm run db:restore -- --input backups/manual_20260217.sql.gz
 npm run db:verify
 ```
 
-## 3) 복구 검증 SQL (추가 확인)
+## 3) 자동 리허설 (권장)
+
+```bash
+npm run db:drill
+```
+
+동작:
+
+1. 현재 DB 백업 생성
+2. 리허설 DB 생성
+3. 확장(unaccent/pg_trgm) 준비
+4. 백업 복구
+5. provider/meta/note 집계 비교
+6. `.runtime/drill/*.md` 리포트 출력
+
+## 4) 복구 검증 SQL
 
 ```sql
 SELECT provider, COUNT(*) FROM unified_items GROUP BY provider ORDER BY provider;
@@ -45,18 +60,11 @@ SELECT key FROM unified_meta ORDER BY key;
 SELECT provider, COUNT(*) FROM unified_notes GROUP BY provider ORDER BY provider;
 ```
 
-## 4) 리허설 체크리스트
-
-- [ ] 백업 파일 생성 확인 (`.sql.gz`)
-- [ ] 별도 테스트 DB로 복구 성공
-- [ ] `db:verify` 결과가 기대 건수와 일치
-- [ ] 앱 구동 후 카드/카테고리/요약 상태 확인
-
 ## 5) 장애 대응 순서
 
-1. API 서버 쓰기 중지(배포 중단/운영자 공지)
+1. API 쓰기 중지(배포 중단/운영 공지)
 2. 최신 백업 선택
-3. 복구 실행(`db:restore`)
+3. 복구 실행
 4. 검증 실행(`db:verify` + 앱 smoke test)
 5. 정상 확인 후 쓰기 재개
 
@@ -65,3 +73,10 @@ SELECT provider, COUNT(*) FROM unified_notes GROUP BY provider ORDER BY provider
 - 일 1회 자동 백업(권장)
 - 주요 배포 전 수동 백업 1회
 - 주 1회 복구 리허설
+
+## 7) 리허설 실행 기록
+
+| 회차 | 일시(UTC) | 백업 파일 | 리허설 DB | 결과 | RTO(s) | RPO | 리포트 |
+|---|---|---|---|---|---:|---|---|
+| 1 | 2026-02-17T14:19:22Z | `backups/drill_20260217T141922Z.sql.gz` | `useful_git_info_drill_20260217t141922z_75830` | PASS | 0 | near-zero | `.runtime/drill/drill_20260217T141922Z.md` |
+| 2 | 2026-02-17T14:38:08Z | `backups/drill_20260217T143808Z.sql.gz` | `useful_git_info_drill_20260217t143808z_86680` | PASS | 0 | near-zero | `.runtime/drill/drill_20260217T143808Z.md` |

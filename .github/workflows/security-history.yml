@@ -1,0 +1,20 @@
+name: Security History
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
+
+jobs:
+  secret-history-scan:
+    name: Secret History Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run history secret scan
+        run: npm run scan:secrets:history

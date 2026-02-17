@@ -3,6 +3,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+augment_postgres_path() {
+  local candidates=(
+    "/opt/homebrew/opt/postgresql@16/bin"
+    "/opt/homebrew/opt/libpq/bin"
+    "/usr/local/opt/postgresql@16/bin"
+    "/usr/local/opt/libpq/bin"
+  )
+
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if [[ -d "$candidate" && ":$PATH:" != *":$candidate:"* ]]; then
+      PATH="$candidate:$PATH"
+    fi
+  done
+  export PATH
+}
+
+augment_postgres_path
+
 load_server_env() {
   local env_file="$ROOT_DIR/server/.env"
   if [[ -f "$env_file" ]]; then
