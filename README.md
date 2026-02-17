@@ -171,6 +171,30 @@ npm run dev:all
 
 `dev:all`은 4000 포트의 기존 서버 프로세스를 먼저 정리한 뒤 최신 서버를 띄웁니다.
 
+## 4.6 Mac mini 상시운영 (잠자기 허용)
+
+잠자기 복귀 후 자동 복구가 필요하면 `launchd` 기반 설치를 사용합니다.
+
+```bash
+npm run macos:install
+npm run macos:status
+```
+
+제거:
+
+```bash
+npm run macos:uninstall
+```
+
+업무 중 대체 복귀 검증:
+
+```bash
+npm run macos:self-test-resume
+npm run macos:check-resume
+```
+
+상세: `docs/MAC_MINI_SLEEP_RESUME_DEPLOYMENT.md`
+
 ## 5. 환경 변수
 
 ## 5.1 Client (`.env.local`)
@@ -322,4 +346,5 @@ Postgres E2E는 별도 포트(기본 `4100`)와 테스트 DB를 사용해 메인
 - 백업/복구 런북: `docs/DB_BACKUP_RESTORE_RUNBOOK.md`
 - 릴리즈/롤백 런북: `docs/RELEASE_ROLLBACK_RUNBOOK.md`
 - 브라우저/모바일 QA: `docs/QA_BROWSER_MOBILE_CHECKLIST.md`
+- Mac mini 잠자기 복귀 운영: `docs/MAC_MINI_SLEEP_RESUME_DEPLOYMENT.md`
 - 서버 전용 가이드: `server/README.md`

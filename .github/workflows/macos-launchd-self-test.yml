@@ -1,0 +1,78 @@
+name: macOS Launchd Self Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  launchd-self-test:
+    name: Launchd Resume Self-Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix server ci
+
+      - name: Setup local PostgreSQL
+        run: |
+          if ! command -v initdb >/dev/null 2>&1; then
+            brew install postgresql@16
+          fi
+          PG_BIN_DIR="$(dirname "$(command -v initdb)")"
+          echo "$PG_BIN_DIR" >> "$GITHUB_PATH"
+
+          initdb -D /tmp/useful-git-info-pgdata
+          pg_ctl -D /tmp/useful-git-info-pgdata -l /tmp/useful-git-info-postgres.log -o "-p 55432" start
+          createdb -p 55432 useful_git_info
+
+      - name: Prepare server env for CI launchd test
+        run: |
+          cat > server/.env <<EOF
+          PORT=4000
+          DATABASE_URL=postgresql://$(whoami)@localhost:55432/useful_git_info
+          PGSSL=false
+          CORS_ORIGIN=http://localhost:5173
+          ADMIN_API_TOKEN=
+          WEB_VITALS_ENABLED=false
+          EOF
+
+      - name: Install launchd agents
+        run: npm run macos:install
+
+      - name: Execute no-sleep resume self-test
+        run: npm run macos:self-test-resume
+
+      - name: Verify status and health
+        run: |
+          npm run macos:status
+          npm run macos:check-resume
+
+      - name: Upload launchd/postgres logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-launchd-logs
+          path: |
+            .runtime/launchd/
+            /tmp/useful-git-info-postgres.log
+          if-no-files-found: warn
+
+      - name: Cleanup launchd and postgres
+        if: always()
+        run: |
+          npm run macos:uninstall || true
+          pg_ctl -D /tmp/useful-git-info-pgdata stop || true
