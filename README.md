@@ -1,4 +1,4 @@
-# Useful Git Info
+# Useful Git Youtube Bookmark Info
 
 <p align="left">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
@@ -10,6 +10,13 @@
 </p>
 
 GitHub, YouTube, Bookmark를 카드보드로 관리하고, PostgreSQL 기반 통합검색을 제공하는 웹앱입니다.
+
+<p align="left">
+<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_52_51" src="https://github.com/user-attachments/assets/7c804836-7e9d-4dbf-a8ef-32bcc624f7d1" />
+<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_50_36" src="https://github.com/user-attachments/assets/2163cd47-abc8-46ab-a2ff-5966a1339369" /><br>
+<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_49_59" src="https://github.com/user-attachments/assets/09e3f8a7-5348-4706-8873-dfb776151513" />
+<img width="40%" height="40%" alt="screencapture-localhost-5173-2026-02-17-13_49_50" src="https://github.com/user-attachments/assets/70ece7eb-4957-46a7-aaa5-6c4ff5b3440c" />
+</p>
 
 ## 1. 핵심 요약
 
