@@ -114,6 +114,7 @@
 - 보드별 핵심 플로우(추가/이동/삭제/검색/복원) 안정 동작
 - 요약 재생성(GitHub/YouTube/Bookmark) 모두 정상 동작
 - 원격 장애 상황에서도 데이터 유실 없이 작업 지속 가능
+- 백업/복구 런북 기준으로 복구 가능(RTO/RPO 확인)
 - `npm run lint`, `npm test`, `npm run build`, `npm run test:e2e:postgres` 통과
 
 ## 7. 제외 범위

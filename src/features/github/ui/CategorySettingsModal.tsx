@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useModalFocusTrap } from '@shared/hooks/useModalFocusTrap'
 import type { Category } from '@shared/types'
 
 type CategorySettingsModalProps = {
@@ -22,6 +23,7 @@ export const CategorySettingsModal = ({
   onRenameCategory,
   onDeleteCategory,
 }: CategorySettingsModalProps) => {
+  const modalRef = useRef<HTMLElement | null>(null)
   const [activeTab, setActiveTab] = useState<'create' | 'manage'>('create')
   const [createName, setCreateName] = useState('')
   const [manageSearch, setManageSearch] = useState('')
@@ -80,20 +82,11 @@ export const CategorySettingsModal = ({
     return [...systemCategories, ...sortedCustomCategories]
   }, [categories, manageSearch, manageSort, showSystemCategories])
 
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        handleClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [handleClose, open])
+  useModalFocusTrap({
+    open,
+    containerRef: modalRef,
+    onClose: handleClose,
+  })
 
   if (!open) {
     return null
@@ -109,7 +102,14 @@ export const CategorySettingsModal = ({
         }
       }}
     >
-      <section className="modal category-settings-modal" role="dialog" aria-modal="true" aria-label="카테고리 설정 모달">
+      <section
+        ref={modalRef}
+        className="modal category-settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="카테고리 설정 모달"
+        tabIndex={-1}
+      >
         <header className="category-settings-header">
           <div>
             <h2>카테고리 설정</h2>

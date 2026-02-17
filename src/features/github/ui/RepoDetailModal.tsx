@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { MAX_NOTE_LENGTH } from '@constants'
 import { fetchLatestCommitSha, fetchRepoDetail } from '@features/github/services/github'
 import { translateBatchToKorean, translateToKorean } from '@services/translation'
 import { getRepoDetailCache, upsertRepoDetailCache } from '@storage/detailCache'
+import { useModalFocusTrap } from '@shared/hooks/useModalFocusTrap'
 import type { GitHubRepoCard, RepoDetailData, RepoNote } from '@shared/types'
 import { formatDate, formatDateTime, formatNumber } from '@utils/format'
 import { renderMarkdownToSafeHtml } from '@utils/markdown'
@@ -66,6 +67,7 @@ export const RepoDetailModal = ({
   onClose,
   onAddNote,
 }: RepoDetailModalProps) => {
+  const modalRef = useRef<HTMLElement | null>(null)
   const [noteInput, setNoteInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<DetailTab>('overview')
@@ -90,20 +92,11 @@ export const RepoDetailModal = ({
   })
   const [translationError, setTranslationError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!repo) {
-      return
-    }
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleEscape)
-    return () => window.removeEventListener('keydown', handleEscape)
-  }, [onClose, repo])
+  useModalFocusTrap({
+    open: Boolean(repo),
+    containerRef: modalRef,
+    onClose,
+  })
 
   useEffect(() => {
     if (!repo) {
@@ -395,7 +388,14 @@ export const RepoDetailModal = ({
         }
       }}
     >
-      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="repo-modal-title">
+      <section
+        ref={modalRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="repo-modal-title"
+        tabIndex={-1}
+      >
         <header className="modal-header">
           <div>
             <h2 id="repo-modal-title">{repo.fullName}</h2>

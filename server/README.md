@@ -51,6 +51,9 @@ cp .env.example .env
 | `GITHUB_API_TIMEOUT_SECONDS` | `12` | GitHub API 타임아웃 |
 | `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 추출 timeout(ms) |
 | `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 북마크 HTML 최대 읽기 바이트 |
+| `WEB_VITALS_ENABLED` | `false` | Web Vitals 수집 활성화 |
+| `WEB_VITALS_MAX_SAMPLES` | `500` | 서버 메모리 내 Web Vitals 샘플 최대 개수 |
+| `WEB_VITALS_SUMMARY_DEFAULT_MINUTES` | `60` | 요약 API 기본 조회 범위(분) |
 
 ## 3. 실행
 
@@ -109,6 +112,8 @@ docker compose up -d
 - `GET /api/search?q=...&provider=...&type=...&mode=...&fuzzy=...&prefix=...&min_score=...`
 - `GET /api/admin/export`
 - `POST /api/admin/import`
+- `GET /api/admin/rum/web-vitals/summary?minutes=60`
+- `DELETE /api/admin/rum/web-vitals/samples`
 
 ## 5.5 YouTube
 

@@ -2,6 +2,7 @@ import compression from 'compression'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import dns from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { getClient, query } from './db.js'
@@ -70,6 +71,18 @@ const youtubeTimeoutMs = Number.isFinite(youtubeTimeoutSeconds) && youtubeTimeou
 const bookmarkFetchTimeoutMs = Number(process.env.BOOKMARK_FETCH_TIMEOUT_MS || 10_000)
 const bookmarkMaxResponseBytes = Number(process.env.BOOKMARK_MAX_RESPONSE_BYTES || 1_048_576)
 const webVitalsEnabled = (process.env.WEB_VITALS_ENABLED || 'false').trim().toLowerCase() === 'true'
+const webVitalsMaxSamplesRaw = Number(process.env.WEB_VITALS_MAX_SAMPLES || 500)
+const WEB_VITALS_MAX_SAMPLES =
+  Number.isFinite(webVitalsMaxSamplesRaw) && webVitalsMaxSamplesRaw > 0 ? Math.floor(webVitalsMaxSamplesRaw) : 500
+const webVitalsSummaryDefaultMinutesRaw = Number(process.env.WEB_VITALS_SUMMARY_DEFAULT_MINUTES || 60)
+const WEB_VITALS_SUMMARY_DEFAULT_MINUTES =
+  Number.isFinite(webVitalsSummaryDefaultMinutesRaw) && webVitalsSummaryDefaultMinutesRaw > 0
+    ? Math.floor(webVitalsSummaryDefaultMinutesRaw)
+    : 60
+const apiSecurityCsp = String(
+  process.env.API_SECURITY_CSP ||
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'",
+).trim()
 const githubSaveMaxDropRatioRaw = Number(process.env.GITHUB_SAVE_MAX_DROP_RATIO || 0.34)
 const githubSaveMaxDropRatio =
   Number.isFinite(githubSaveMaxDropRatioRaw) && githubSaveMaxDropRatioRaw >= 0 && githubSaveMaxDropRatioRaw <= 1
@@ -96,6 +109,7 @@ let githubSummaryWorkerRuntime = null
 let bookmarkSummaryWorkerRuntime = null
 
 const app = express()
+app.disable('x-powered-by')
 app.use(express.json({ limit: '8mb' }))
 app.use(compression({ threshold: 1024 }))
 
@@ -117,9 +131,69 @@ app.use(
   }),
 )
 
-app.use((req, _res, next) => {
-  const now = new Date().toISOString()
-  console.log(`[${now}] ${req.method} ${req.path}`)
+const maskSensitiveText = (value) => {
+  if (typeof value !== 'string' || !value) {
+    return value
+  }
+
+  return value
+    .replace(/(bearer\s+)[a-z0-9._-]+/gi, '$1[REDACTED]')
+    .replace(/(x-admin-token["']?\s*[:=]\s*["']?)[^"',\s]+/gi, '$1[REDACTED]')
+    .replace(/(api[_-]?key["']?\s*[:=]\s*["']?)[^"',\s]+/gi, '$1[REDACTED]')
+}
+
+const toSafeLog = (payload) => {
+  const seen = new WeakSet()
+  return JSON.parse(
+    JSON.stringify(payload, (_key, value) => {
+      if (typeof value === 'string') {
+        return maskSensitiveText(value)
+      }
+
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) {
+          return '[Circular]'
+        }
+        seen.add(value)
+      }
+
+      return value
+    }),
+  )
+}
+
+const resolveClientIp = (req) => req.ip || req.socket?.remoteAddress || 'unknown'
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    res.set('Content-Security-Policy', apiSecurityCsp)
+    res.set('X-Content-Type-Options', 'nosniff')
+    res.set('X-Frame-Options', 'DENY')
+    res.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+    res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  }
+
+  const requestId = String(req.get('x-request-id') || '').trim() || randomUUID()
+  const startedAt = Date.now()
+  req.requestId = requestId
+  res.set('x-request-id', requestId)
+
+  res.on('finish', () => {
+    const durationMs = Date.now() - startedAt
+    const log = toSafeLog({
+      level: 'info',
+      ts: new Date().toISOString(),
+      requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs,
+      ip: resolveClientIp(req),
+      userAgent: String(req.get('user-agent') || '').slice(0, 180),
+    })
+    console.log(JSON.stringify(log))
+  })
+
   next()
 })
 
@@ -178,8 +252,95 @@ const cleanupSearchRateLimitMap = (now = Date.now()) => {
 setInterval(() => {
   cleanupSearchRateLimitMap()
 }, SEARCH_RATE_LIMIT_CLEANUP_INTERVAL_MS).unref?.()
+
+const apiRateLimitMap = new Map()
+const API_RATE_LIMIT_CLEANUP_INTERVAL_MS = 5 * 60 * 1000
+const API_RATE_LIMIT_BUCKETS = [
+  {
+    key: 'summary',
+    windowMs: 60 * 1000,
+    max: 40,
+    match: (req) =>
+      req.path.includes('/summaries/') ||
+      req.path.endsWith('/summaries/regenerate') ||
+      req.path.endsWith('/summarize'),
+  },
+  {
+    key: 'metadata',
+    windowMs: 60 * 1000,
+    max: 80,
+    match: (req) =>
+      req.path.startsWith('/api/bookmark/metadata') ||
+      req.path.startsWith('/api/bookmark/link-check') ||
+      req.path.startsWith('/api/youtube/videos/'),
+  },
+  {
+    key: 'write',
+    windowMs: 60 * 1000,
+    max: 120,
+    match: (req) => req.method !== 'GET' && req.path.startsWith('/api/'),
+  },
+]
+
+const cleanupApiRateLimitMap = (now = Date.now()) => {
+  for (const [key, entry] of apiRateLimitMap.entries()) {
+    if (now - entry.windowStart >= entry.windowMs * 2) {
+      apiRateLimitMap.delete(key)
+    }
+  }
+}
+
+setInterval(() => {
+  cleanupApiRateLimitMap()
+}, API_RATE_LIMIT_CLEANUP_INTERVAL_MS).unref?.()
+
+const applyApiRateLimit = (req, res, next) => {
+  if (!req.path.startsWith('/api/')) {
+    next()
+    return
+  }
+
+  if (req.path.startsWith('/api/health') || req.path.startsWith('/api/search')) {
+    next()
+    return
+  }
+
+  const bucket = API_RATE_LIMIT_BUCKETS.find((candidate) => candidate.match(req))
+  if (!bucket) {
+    next()
+    return
+  }
+
+  const ip = resolveClientIp(req)
+  const now = Date.now()
+  const key = `${bucket.key}:${ip}`
+  const current = apiRateLimitMap.get(key)
+
+  if (!current || now - current.windowStart >= bucket.windowMs) {
+    apiRateLimitMap.set(key, {
+      windowStart: now,
+      count: 1,
+      windowMs: bucket.windowMs,
+    })
+    next()
+    return
+  }
+
+  if (current.count >= bucket.max) {
+    const retryAfterSec = Math.max(1, Math.ceil((bucket.windowMs - (now - current.windowStart)) / 1000))
+    res.set('Retry-After', String(retryAfterSec))
+    const error = new Error('요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.')
+    error.status = 429
+    next(error)
+    return
+  }
+
+  current.count += 1
+  next()
+}
+
+app.use(applyApiRateLimit)
 const webVitalsSamples = []
-const WEB_VITALS_MAX_SAMPLES = 500
 
 const createHttpError = (status, message) => {
   const error = new Error(message)
@@ -4261,6 +4422,77 @@ app.get('/api/search', applySearchRateLimit, async (req, res, next) => {
   }
 })
 
+const percentile = (values, p) => {
+  if (!Array.isArray(values) || values.length === 0) {
+    return 0
+  }
+
+  const sorted = [...values].sort((a, b) => a - b)
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
+  return Number(sorted[index].toFixed(2))
+}
+
+const summarizeWebVitalsSamples = (samples, windowMinutes) => {
+  const now = Date.now()
+  const fromMs = now - windowMinutes * 60 * 1000
+  const recent = samples.filter((sample) => {
+    const createdAt = Date.parse(sample.createdAt)
+    return Number.isFinite(createdAt) && createdAt >= fromMs
+  })
+
+  const metricsMap = new Map()
+  const providers = new Map()
+  const pages = new Map()
+
+  for (const sample of recent) {
+    const metric = metricsMap.get(sample.name) || {
+      count: 0,
+      values: [],
+      ratings: { good: 0, 'needs-improvement': 0, poor: 0 },
+    }
+    metric.count += 1
+    metric.values.push(sample.value)
+    if (sample.rating === 'good' || sample.rating === 'needs-improvement' || sample.rating === 'poor') {
+      metric.ratings[sample.rating] += 1
+    }
+    metricsMap.set(sample.name, metric)
+
+    const providerKey = sample.provider || 'unknown'
+    providers.set(providerKey, (providers.get(providerKey) || 0) + 1)
+
+    if (sample.page) {
+      pages.set(sample.page, (pages.get(sample.page) || 0) + 1)
+    }
+  }
+
+  const metrics = {}
+  for (const [name, metric] of metricsMap.entries()) {
+    const total = metric.count
+    const sum = metric.values.reduce((accumulator, value) => accumulator + value, 0)
+    metrics[name] = {
+      count: total,
+      avg: Number((sum / total).toFixed(2)),
+      p75: percentile(metric.values, 75),
+      p90: percentile(metric.values, 90),
+      ratings: metric.ratings,
+    }
+  }
+
+  const topPages = [...pages.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)
+    .map(([path, count]) => ({ path, count }))
+
+  return {
+    generatedAt: new Date().toISOString(),
+    totalSamples: recent.length,
+    windowMinutes,
+    metrics,
+    byProvider: Object.fromEntries([...providers.entries()].sort((a, b) => b[1] - a[1])),
+    topPages,
+  }
+}
+
 app.post('/api/rum/web-vitals', async (req, res, next) => {
   try {
     if (!webVitalsEnabled) {
@@ -4305,6 +4537,30 @@ app.post('/api/rum/web-vitals', async (req, res, next) => {
       webVitalsSamples.splice(0, webVitalsSamples.length - WEB_VITALS_MAX_SAMPLES)
     }
 
+    res.status(204).end()
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/admin/rum/web-vitals/summary', requireAdminAuth, async (req, res, next) => {
+  try {
+    const minutes = parsePositiveInt(req.query.minutes, WEB_VITALS_SUMMARY_DEFAULT_MINUTES, { min: 1, max: 1440 })
+    const summary = summarizeWebVitalsSamples(webVitalsSamples, minutes)
+    res.json({
+      ok: true,
+      enabled: webVitalsEnabled,
+      retainedSampleCount: webVitalsSamples.length,
+      ...summary,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.delete('/api/admin/rum/web-vitals/samples', requireAdminAuth, async (_req, res, next) => {
+  try {
+    webVitalsSamples.splice(0, webVitalsSamples.length)
     res.status(204).end()
   } catch (error) {
     next(error)
@@ -4501,7 +4757,18 @@ app.post('/api/admin/import', requireAdminAuth, async (req, res, next) => {
 app.use((error, _req, res, _next) => {
   const status = typeof error?.status === 'number' ? error.status : 500
   const message = error instanceof Error ? error.message : 'internal error'
-  console.error('[api error]', message)
+
+  const requestId = _req?.requestId || null
+  const log = toSafeLog({
+    level: 'error',
+    ts: new Date().toISOString(),
+    requestId,
+    method: _req?.method || 'UNKNOWN',
+    path: _req?.path || 'UNKNOWN',
+    status,
+    message,
+  })
+  console.error(JSON.stringify(log))
   res.status(status).json({ ok: false, message })
 })
 

@@ -153,7 +153,15 @@ export const YoutubeCard = ({
       </header>
 
       <a href={card.videoUrl} target="_blank" rel="noreferrer" className="youtube-thumbnail-link" aria-label="YouTube 링크 열기">
-        <img src={card.thumbnailUrl} alt={card.title} className="youtube-thumbnail" loading="lazy" />
+        <img
+          src={card.thumbnailUrl}
+          alt={card.title}
+          className="youtube-thumbnail"
+          loading="lazy"
+          decoding="async"
+          width={640}
+          height={360}
+        />
       </a>
 
       <div className="repo-meta-line youtube-meta-line">

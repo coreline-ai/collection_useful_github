@@ -208,6 +208,9 @@ npm run dev:all
 | `GITHUB_SUMMARY_README_MAX_BYTES` | `8192` | GitHub README 입력 최대 바이트 |
 | `BOOKMARK_FETCH_TIMEOUT_MS` | `10000` | 북마크 메타 추출 타임아웃 |
 | `BOOKMARK_MAX_RESPONSE_BYTES` | `1048576` | 메타 추출 최대 응답 바이트 |
+| `WEB_VITALS_ENABLED` | `false` | 서버 RUM 수집 활성화 |
+| `WEB_VITALS_MAX_SAMPLES` | `500` | 서버 메모리 내 RUM 샘플 유지 개수 |
+| `WEB_VITALS_SUMMARY_DEFAULT_MINUTES` | `60` | RUM 요약 조회 기본 기간(분) |
 
 세부 변수는 `server/.env.example`를 기준으로 사용하세요.
 
@@ -220,6 +223,8 @@ npm run dev:all
 - `GET /api/search`
 - `GET /api/admin/export`
 - `POST /api/admin/import`
+- `GET /api/admin/rum/web-vitals/summary`
+- `DELETE /api/admin/rum/web-vitals/samples`
 
 ### 6.2 대시보드
 
@@ -279,6 +284,8 @@ score =
 - `npm test`
 - `npm run build`
 - `npm run test:e2e:postgres`
+- `npm run scan:secrets`
+- `npm run audit:deps`
 
 Postgres E2E는 별도 포트(기본 `4100`)와 테스트 DB를 사용해 메인 개발 DB 오염을 방지합니다.
 
@@ -311,4 +318,8 @@ Postgres E2E는 별도 포트(기본 `4100`)와 테스트 DB를 사용해 메인
 - 제품 요구사항: `docs/PRD.md`
 - 기술 설계: `docs/TRD.md`
 - 계획 문서: `docs/PLAN.md`, `docs/PLAN_EXTENTION1.md`
+- 운영 체크리스트: `docs/WEBAPP_ESSENTIAL_CHECKLIST_PLAN.md`
+- 백업/복구 런북: `docs/DB_BACKUP_RESTORE_RUNBOOK.md`
+- 릴리즈/롤백 런북: `docs/RELEASE_ROLLBACK_RUNBOOK.md`
+- 브라우저/모바일 QA: `docs/QA_BROWSER_MOBILE_CHECKLIST.md`
 - 서버 전용 가이드: `server/README.md`

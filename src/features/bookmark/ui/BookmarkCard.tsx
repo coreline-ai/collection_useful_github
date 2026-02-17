@@ -156,7 +156,15 @@ export const BookmarkCard = ({
 
       <a href={card.url} target="_blank" rel="noreferrer" className="bookmark-preview-link" aria-label="북마크 링크 열기">
         {card.thumbnailUrl ? (
-          <img src={card.thumbnailUrl} alt={card.title} className="bookmark-thumbnail" loading="lazy" />
+          <img
+            src={card.thumbnailUrl}
+            alt={card.title}
+            className="bookmark-thumbnail"
+            loading="lazy"
+            decoding="async"
+            width={640}
+            height={360}
+          />
         ) : (
           <div className="bookmark-thumbnail bookmark-thumbnail-fallback">{card.domain}</div>
         )}
