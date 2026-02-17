@@ -1,6 +1,6 @@
 {
-  "name": "Collection Useful Hub",
-  "short_name": "UsefulHub",
+  "name": "개인 작업 정보",
+  "short_name": "개인작업",
   "description": "GitHub, YouTube, Bookmark를 카드형 대시보드로 저장/검색/분류하는 통합 웹 앱",
   "start_url": "/",
   "display": "standalone",
@@ -9,7 +9,7 @@
   "lang": "ko-KR",
   "icons": [
     {
-      "src": "/vite.svg",
+      "src": "/personal-work-info-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any"
