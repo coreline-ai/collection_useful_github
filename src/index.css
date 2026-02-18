@@ -45,6 +45,9 @@
   --color-shadow-hero: 0 24px 60px -42px rgba(10, 33, 68, 0.65);
   --color-shadow-popover: 0 10px 25px -18px rgba(18, 47, 92, 0.95);
   --color-shadow-modal: 0 28px 64px -30px rgba(0, 15, 34, 0.85);
+  --color-scrollbar-track: rgba(17, 42, 82, 0.1);
+  --color-scrollbar-thumb: rgba(31, 78, 137, 0.45);
+  --color-scrollbar-thumb-hover: rgba(31, 78, 137, 0.62);
 
   /* Backward-compatible aliases used throughout App.css */
   --text-main: var(--color-text-primary);
@@ -106,6 +109,9 @@
   --color-shadow-hero: none;
   --color-shadow-popover: none;
   --color-shadow-modal: none;
+  --color-scrollbar-track: rgba(255, 255, 255, 0.08);
+  --color-scrollbar-thumb: rgba(159, 197, 248, 0.42);
+  --color-scrollbar-thumb-hover: rgba(159, 197, 248, 0.6);
 }
 
 * {

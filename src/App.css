@@ -693,10 +693,16 @@
   transform: translateY(-0.33rem) rotate(45deg);
 }
 
-.github-summary-tooltip-wrap:hover .github-summary-tooltip,
-.github-summary-tooltip-wrap:focus-within .github-summary-tooltip {
+.github-summary-tooltip-wrap .repo-summary:focus-visible + .github-summary-tooltip {
   opacity: 1;
   transform: translateY(0);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .github-summary-tooltip-wrap:hover .github-summary-tooltip {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .repo-summary-controls {
@@ -1267,12 +1273,36 @@
 .modal {
   width: min(900px, 100%);
   max-height: 90vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-radius: 18px;
   border: 1px solid var(--color-border);
   background: var(--color-surface-elevated);
   padding: 1.2rem;
   box-shadow: var(--color-shadow-modal);
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+.modal::-webkit-scrollbar {
+  width: 12px;
+}
+
+.modal::-webkit-scrollbar-track {
+  background: var(--color-scrollbar-track);
+  border-radius: 999px;
+  margin-block: 0.55rem;
+}
+
+.modal::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid var(--color-scrollbar-track);
+}
+
+.modal::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 .modal-header {
@@ -1280,6 +1310,7 @@
   justify-content: space-between;
   gap: 1rem;
   align-items: flex-start;
+  padding-bottom: 0.72rem;
 }
 
 .modal-header h2 {
@@ -1343,8 +1374,8 @@
 }
 
 .modal-tabs {
-  margin-top: 0.95rem;
-  border-bottom: 1px solid var(--color-border);
+  margin-top: 1.05rem;
+  padding-bottom: 0.62rem;
   display: flex;
   gap: 0.45rem;
 }
@@ -1363,7 +1394,9 @@
 }
 
 .cache-control-row {
-  margin-top: 0.7rem;
+  margin-top: 0.9rem;
+  padding-top: 0.72rem;
+  border-top: 1px solid var(--color-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1473,6 +1506,29 @@
   color: var(--color-readme-panel-text);
   overflow: auto;
   max-height: 320px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+.readme-panel::-webkit-scrollbar {
+  width: 10px;
+}
+
+.readme-panel::-webkit-scrollbar-track {
+  background: var(--color-scrollbar-track);
+  border-radius: 999px;
+  margin-block: 0.45rem;
+}
+
+.readme-panel::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid var(--color-scrollbar-track);
+}
+
+.readme-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 .readme-markdown {
