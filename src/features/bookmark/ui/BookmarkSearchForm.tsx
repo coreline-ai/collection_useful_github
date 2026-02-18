@@ -21,7 +21,12 @@ export const BookmarkSearchForm = ({ value, onChange }: BookmarkSearchFormProps)
           aria-label="등록 카드 검색"
         />
         {value.trim().length > 0 ? (
-          <button type="button" onClick={() => onChange('')} aria-label="등록 카드 검색 초기화">
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            onClick={() => onChange('')}
+            aria-label="등록 카드 검색 초기화"
+          >
             X
           </button>
         ) : null}

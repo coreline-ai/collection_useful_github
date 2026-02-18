@@ -406,7 +406,7 @@ export const RepoDetailModal = ({
               <HeaderBadge icon="watch" label="Watchers" value={repo.watchers} />
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="상세 팝업 닫기">
+          <button type="button" className="btn btn-secondary" onClick={onClose} aria-label="상세 팝업 닫기">
             닫기
           </button>
         </header>
@@ -414,21 +414,21 @@ export const RepoDetailModal = ({
         <nav className="modal-tabs" aria-label="저장소 상세 탭">
           <button
             type="button"
-            className={activeTab === 'overview' ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeTab === 'overview' ? 'is-active active' : ''}`}
             onClick={() => setActiveTab('overview')}
           >
             개요
           </button>
           <button
             type="button"
-            className={activeTab === 'readme' ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeTab === 'readme' ? 'is-active active' : ''}`}
             onClick={() => setActiveTab('readme')}
           >
             README
           </button>
           <button
             type="button"
-            className={activeTab === 'activity' ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeTab === 'activity' ? 'is-active active' : ''}`}
             onClick={() => setActiveTab('activity')}
           >
             Activity
@@ -444,11 +444,11 @@ export const RepoDetailModal = ({
             )}
           </div>
           <div className="cache-actions">
-            <button type="button" className="translate-button" onClick={() => void handleCheckForUpdate()} disabled={updateCheckLoading || detailLoading}>
+            <button type="button" className="btn btn-secondary translate-button" onClick={() => void handleCheckForUpdate()} disabled={updateCheckLoading || detailLoading}>
               {updateCheckLoading ? '확인 중...' : '업데이트 확인'}
             </button>
             {hasRemoteUpdate ? (
-              <button type="button" className="translate-button" onClick={() => void refreshDetailData()} disabled={updateCheckLoading || detailLoading}>
+              <button type="button" className="btn btn-secondary translate-button" onClick={() => void refreshDetailData()} disabled={updateCheckLoading || detailLoading}>
                 최신 데이터 불러오기
               </button>
             ) : null}
@@ -467,7 +467,7 @@ export const RepoDetailModal = ({
               <div className="tab-action-row">
                 <button
                   type="button"
-                  className="translate-button"
+                  className="btn btn-secondary translate-button"
                   onClick={() => void handleTranslateOverview()}
                   disabled={translationLoading.overview}
                 >
@@ -514,7 +514,7 @@ export const RepoDetailModal = ({
               <div className="tab-action-row">
                 <button
                   type="button"
-                  className="translate-button"
+                  className="btn btn-secondary translate-button"
                   onClick={() => void handleTranslateReadme()}
                   disabled={translationLoading.readme || !detailData?.readmePreview}
                 >
@@ -540,7 +540,7 @@ export const RepoDetailModal = ({
               <div className="tab-action-row">
                 <button
                   type="button"
-                  className="translate-button"
+                  className="btn btn-secondary translate-button"
                   onClick={() => void handleTranslateActivity()}
                   disabled={translationLoading.activity || activityItems.length === 0}
                 >
@@ -585,7 +585,7 @@ export const RepoDetailModal = ({
               maxLength={MAX_NOTE_LENGTH}
               disabled={readOnly}
             />
-            <button type="submit" disabled={readOnly}>
+            <button type="submit" className="btn btn-primary" disabled={readOnly}>
               입력
             </button>
           </form>

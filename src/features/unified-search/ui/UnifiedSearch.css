@@ -34,13 +34,9 @@
 
 .global-search button,
 .backup-tools button {
-  border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
-  background: var(--color-surface-1);
-  color: var(--text-subtle);
   font-size: 0.78rem;
-  font-weight: 700;
   padding: 0.42rem 0.66rem;
+  white-space: nowrap;
 }
 
 .backup-tools {
@@ -188,12 +184,7 @@
 }
 
 .recent-searches-header button {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface-1);
-  color: var(--text-muted);
   font-size: 0.74rem;
-  font-weight: 700;
   padding: 0.25rem 0.48rem;
 }
 
@@ -207,10 +198,6 @@
   display: inline-flex;
   align-items: center;
   gap: 0.38rem;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-surface-1);
-  color: var(--text-subtle);
   font-size: 0.76rem;
   padding: 0.3rem 0.55rem;
 }

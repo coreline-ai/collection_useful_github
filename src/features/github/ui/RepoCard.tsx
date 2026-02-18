@@ -50,6 +50,12 @@ export const RepoCard = ({
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
   const summaryStatus = repo.summaryStatus ?? (repo.summary.trim() ? 'ready' : 'idle')
   const summaryText = repo.summary?.trim() || '요약 정보가 없습니다.'
+  const summaryButtonDisabled = readOnly || summaryStatus === 'queued'
+  const summaryButtonTitle = readOnly
+    ? '읽기 전용 모드에서는 요약 재생성을 사용할 수 없습니다.'
+    : summaryStatus === 'queued'
+      ? '요약 생성 중입니다.'
+      : '요약을 다시 생성합니다.'
   const summaryTooltipId = `github-summary-tooltip-${repo.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   useEffect(() => {
@@ -82,7 +88,7 @@ export const RepoCard = ({
           <div className="move-menu" ref={moveMenuRef}>
             <button
               type="button"
-              className="move-button"
+              className="btn btn-secondary btn-icon move-button"
               aria-label="카테고리 이동"
               disabled={readOnly}
               onClick={(event) => {
@@ -99,6 +105,7 @@ export const RepoCard = ({
                   <button
                     key={category.id}
                     type="button"
+                    className="btn btn-secondary"
                     disabled={readOnly || category.id === repo.categoryId}
                     onClick={() => {
                       onMove(repo.id, category.id)
@@ -114,7 +121,7 @@ export const RepoCard = ({
 
           <button
             type="button"
-            className="delete-button"
+            className="btn btn-danger delete-button"
             disabled={readOnly}
             onClick={(event) => {
               event.stopPropagation()
@@ -140,9 +147,17 @@ export const RepoCard = ({
         <span className={`repo-summary-badge summary-${summaryStatus}`}>{summaryStatusLabel(summaryStatus)}</span>
         <button
           type="button"
-          className="repo-summary-refresh"
-          disabled={readOnly || summaryStatus === 'queued'}
-          onClick={() => onRegenerateSummary(repo.id)}
+          className={`btn btn-secondary repo-summary-refresh${summaryButtonDisabled ? ' is-disabled' : ''}`}
+          aria-disabled={summaryButtonDisabled}
+          title={summaryButtonTitle}
+          aria-label="요약 재생성"
+          onClick={() => {
+            if (summaryButtonDisabled) {
+              return
+            }
+
+            onRegenerateSummary(repo.id)
+          }}
         >
           {summaryStatus === 'queued' ? '생성중...' : '요약 재생성'}
         </button>
@@ -172,7 +187,7 @@ export const RepoCard = ({
         </a>
         <button
           type="button"
-          className="detail-button"
+          className="btn btn-secondary detail-button"
           onClick={(event) => {
             event.stopPropagation()
             onOpenDetail(repo.id)

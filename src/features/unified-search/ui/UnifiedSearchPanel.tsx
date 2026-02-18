@@ -72,7 +72,7 @@ export const UnifiedSearchPanel = ({
             <option value="video">Video</option>
             <option value="bookmark">Bookmark</option>
           </select>
-          <button type="submit" disabled={searchLoading}>
+          <button type="submit" className="btn btn-primary" disabled={searchLoading}>
             {searchLoading ? '검색 중...' : '검색'}
           </button>
         </form>
@@ -104,7 +104,7 @@ export const UnifiedSearchPanel = ({
         <section className="recent-searches" aria-label="최근 검색어">
           <div className="recent-searches-header">
             <strong>최근 검색어</strong>
-            <button type="button" onClick={onClearRecentQueries}>
+            <button type="button" className="btn btn-secondary" onClick={onClearRecentQueries}>
               지우기
             </button>
           </div>
@@ -112,6 +112,7 @@ export const UnifiedSearchPanel = ({
             {recentQueries.map((recentQuery) => (
               <button
                 type="button"
+                className="btn btn-secondary btn-pill"
                 key={`${recentQuery.q}:${recentQuery.provider}:${recentQuery.type}`}
                 onClick={() => {
                   void onSelectRecentQuery(recentQuery)

@@ -18,6 +18,7 @@ export const BackupTools = ({
       <div className="backup-tool-item">
         <button
           type="button"
+          className="btn btn-secondary"
           aria-describedby="backup-export-tooltip"
           onClick={() => void onExportBackup()}
           disabled={loading}
@@ -31,6 +32,7 @@ export const BackupTools = ({
       <div className="backup-tool-item">
         <button
           type="button"
+          className="btn btn-secondary"
           aria-describedby="backup-import-tooltip"
           onClick={() => importInputRef.current?.click()}
           disabled={loading}

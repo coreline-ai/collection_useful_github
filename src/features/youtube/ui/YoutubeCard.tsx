@@ -112,7 +112,7 @@ export const YoutubeCard = ({
           <div className="move-menu" ref={moveMenuRef}>
             <button
               type="button"
-              className="move-button"
+              className="btn btn-secondary btn-icon move-button"
               aria-label="카테고리 이동"
               onClick={(event) => {
                 event.stopPropagation()
@@ -128,6 +128,7 @@ export const YoutubeCard = ({
                   <button
                     key={category.id}
                     type="button"
+                    className="btn btn-secondary"
                     disabled={category.id === card.categoryId}
                     onClick={() => {
                       onMove(card.id, category.id)
@@ -143,7 +144,7 @@ export const YoutubeCard = ({
 
           <button
             type="button"
-            className="delete-button"
+            className="btn btn-danger delete-button"
             onClick={() => onDelete(card.id)}
             aria-label={`${card.title} 삭제`}
           >
@@ -175,7 +176,7 @@ export const YoutubeCard = ({
           {card.summaryStatus === 'failed' || card.summaryStatus === 'ready' ? (
             <button
               type="button"
-              className="youtube-summary-retry"
+              className="btn btn-secondary youtube-summary-retry"
               onClick={() => onRetrySummary(safeVideoId)}
             >
               요약 재생성

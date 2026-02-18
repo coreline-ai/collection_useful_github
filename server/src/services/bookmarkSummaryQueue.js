@@ -208,6 +208,7 @@ export const enqueueBookmarkSummaryJob = async ({
         max_attempts = EXCLUDED.max_attempts,
         updated_at = NOW(),
         status = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 'queued'
           WHEN bookmark_summary_jobs.status IN ('failed', 'dead') THEN 'queued'
           WHEN bookmark_summary_jobs.status = 'running'
             AND (
@@ -217,6 +218,7 @@ export const enqueueBookmarkSummaryJob = async ({
           ELSE bookmark_summary_jobs.status
         END,
         next_run_at = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead', 'queued') THEN NOW()
           WHEN bookmark_summary_jobs.status IN ('failed', 'dead') THEN NOW()
           WHEN bookmark_summary_jobs.status = 'running'
             AND (
@@ -226,6 +228,7 @@ export const enqueueBookmarkSummaryJob = async ({
           ELSE bookmark_summary_jobs.next_run_at
         END,
         attempt_count = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 0
           WHEN bookmark_summary_jobs.status IN ('failed', 'dead') THEN 0
           WHEN bookmark_summary_jobs.status = 'running'
             AND (
@@ -233,6 +236,18 @@ export const enqueueBookmarkSummaryJob = async ({
               OR bookmark_summary_jobs.locked_at < NOW() - (($5::bigint || ' milliseconds')::interval)
             ) THEN 0
           ELSE bookmark_summary_jobs.attempt_count
+        END,
+        result_summary = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE bookmark_summary_jobs.result_summary
+        END,
+        error_code = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE bookmark_summary_jobs.error_code
+        END,
+        error_message = CASE
+          WHEN $6::boolean = TRUE AND bookmark_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE bookmark_summary_jobs.error_message
         END
       RETURNING
         id,
@@ -257,6 +272,7 @@ export const enqueueBookmarkSummaryJob = async ({
       Math.max(1, Number(maxAttempts) || getBookmarkSummaryMaxAttempts()),
       JSON.stringify(mergedPayload),
       staleLockMs,
+      Boolean(force),
     ],
   )
 

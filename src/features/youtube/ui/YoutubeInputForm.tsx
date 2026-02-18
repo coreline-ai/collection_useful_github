@@ -36,7 +36,7 @@ export const YoutubeInputForm = ({ onSubmit, loading, errorMessage }: YoutubeInp
           autoComplete="off"
           required
         />
-        <button type="submit" disabled={loading}>
+        <button type="submit" className="btn btn-primary" disabled={loading}>
           {loading ? '조회 중...' : '추가'}
         </button>
       </div>
