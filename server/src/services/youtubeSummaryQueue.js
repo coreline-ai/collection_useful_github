@@ -215,6 +215,7 @@ export const enqueueYoutubeSummaryJob = async ({
         max_attempts = EXCLUDED.max_attempts,
         updated_at = NOW(),
         status = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 'queued'
           WHEN youtube_summary_jobs.status IN ('failed', 'dead') THEN 'queued'
           WHEN youtube_summary_jobs.status = 'running'
             AND (
@@ -224,6 +225,7 @@ export const enqueueYoutubeSummaryJob = async ({
           ELSE youtube_summary_jobs.status
         END,
         next_run_at = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead', 'queued') THEN NOW()
           WHEN youtube_summary_jobs.status IN ('failed', 'dead') THEN NOW()
           WHEN youtube_summary_jobs.status = 'running'
             AND (
@@ -233,6 +235,7 @@ export const enqueueYoutubeSummaryJob = async ({
           ELSE youtube_summary_jobs.next_run_at
         END,
         attempt_count = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 0
           WHEN youtube_summary_jobs.status IN ('failed', 'dead') THEN 0
           WHEN youtube_summary_jobs.status = 'running'
             AND (
@@ -240,6 +243,18 @@ export const enqueueYoutubeSummaryJob = async ({
               OR youtube_summary_jobs.locked_at < NOW() - (($5::bigint || ' milliseconds')::interval)
             ) THEN 0
           ELSE youtube_summary_jobs.attempt_count
+        END,
+        result_summary = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE youtube_summary_jobs.result_summary
+        END,
+        error_code = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE youtube_summary_jobs.error_code
+        END,
+        error_message = CASE
+          WHEN $6::boolean = TRUE AND youtube_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE youtube_summary_jobs.error_message
         END
       RETURNING
         id,
@@ -264,6 +279,7 @@ export const enqueueYoutubeSummaryJob = async ({
       Math.max(1, Number(maxAttempts) || getYoutubeSummaryMaxAttempts()),
       JSON.stringify(mergedPayload),
       staleLockMs,
+      Boolean(force),
     ],
   )
 

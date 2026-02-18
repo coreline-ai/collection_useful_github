@@ -957,7 +957,7 @@ export const BookmarkFeatureEntry = ({
             <button
               key={category.id}
               type="button"
-              className={category.id === state.selectedCategoryId ? 'active' : ''}
+              className={`btn btn-ghost btn-pill ${category.id === state.selectedCategoryId ? 'is-active active' : ''}`}
               onClick={() => {
                 dispatch({ type: 'selectCategory', payload: { categoryId: category.id } })
                 setCategoryMessage(null)
@@ -970,7 +970,7 @@ export const BookmarkFeatureEntry = ({
           <div className="category-settings">
             <button
               type="button"
-              className="theme-toggle"
+              className="btn btn-ghost btn-pill btn-icon theme-toggle"
               onClick={onToggleTheme}
               aria-label={themeMode === 'light' ? '다크 테마 켜기' : '라이트 테마 켜기'}
               title={themeMode === 'light' ? '다크 테마 켜기' : '라이트 테마 켜기'}
@@ -979,7 +979,7 @@ export const BookmarkFeatureEntry = ({
             </button>
             <button
               type="button"
-              className="settings-trigger"
+              className="btn btn-ghost btn-pill btn-icon settings-trigger"
               onClick={() => {
                 setCategoryMessage(null)
                 setIsCategoryModalOpen(true)
@@ -1059,7 +1059,7 @@ export const BookmarkFeatureEntry = ({
                   </div>
                   <button
                     type="button"
-                    className="bookmark-tool-button"
+                    className="btn btn-secondary bookmark-tool-button"
                     onClick={() => handleMergeDuplicateGroup(group)}
                   >
                     중복 병합

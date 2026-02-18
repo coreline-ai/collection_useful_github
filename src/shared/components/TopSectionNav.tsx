@@ -24,7 +24,7 @@ export const TopSectionNav = ({
             type="button"
             role="tab"
             aria-selected={activeSection === section}
-            className={activeSection === section ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeSection === section ? 'is-active active' : ''}`}
             onClick={() => onChangeSection(section)}
           >
             {TOP_SECTION_LABEL[section]}

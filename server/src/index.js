@@ -5,6 +5,8 @@ import express from 'express'
 import { randomUUID } from 'node:crypto'
 import dns from 'node:dns/promises'
 import { isIP } from 'node:net'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { getClient, query } from './db.js'
 import { migrate } from './migrate.js'
 import { generateGithubSummaryState, resolveGithubSummaryConfig } from './services/githubSummary.js'
@@ -45,6 +47,13 @@ import {
 } from './services/youtubeSummaryQueue.js'
 import { startYoutubeSummaryWorker } from './services/youtubeSummaryWorker.js'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
+dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
+dotenv.config({ path: path.resolve(__dirname, '../../.env') })
+dotenv.config({ path: path.resolve(__dirname, '../../.env.local') })
 dotenv.config()
 
 const PROVIDERS = new Set(['github', 'youtube', 'bookmark'])
@@ -53,7 +62,12 @@ const DASHBOARD_META_KEY = 'github_dashboard_v1'
 const YOUTUBE_DASHBOARD_META_KEY = 'youtube_dashboard_v1'
 const BOOKMARK_DASHBOARD_META_KEY = 'bookmark_dashboard_v1'
 const youtubeApiKey = (process.env.YOUTUBE_API_KEY || '').trim()
-const githubApiToken = (process.env.GITHUB_API_TOKEN || process.env.GITHUB_TOKEN || '').trim()
+const githubApiToken = (
+  process.env.GITHUB_API_TOKEN ||
+  process.env.GITHUB_TOKEN ||
+  process.env.VITE_GITHUB_TOKEN ||
+  ''
+).trim()
 const adminApiToken = (process.env.ADMIN_API_TOKEN || '').trim()
 const githubApiTimeoutSeconds = Number(process.env.GITHUB_API_TIMEOUT_SECONDS || 12)
 const githubApiTimeoutMs = Number.isFinite(githubApiTimeoutSeconds) && githubApiTimeoutSeconds > 0
@@ -1885,7 +1899,11 @@ const parseGithubApiErrorMessage = async (response) => {
 
   if (response.status === 403) {
     if (lower.includes('rate limit')) {
-      return 'GitHub API 요청 제한에 도달했습니다. GITHUB_API_TOKEN 설정을 권장합니다.'
+      if (githubApiToken) {
+        return 'GitHub API 요청 제한에 도달했습니다. 토큰을 사용 중이지만 현재 한도에 걸렸습니다. 잠시 후 다시 시도하거나 토큰 상태/권한을 확인해 주세요.'
+      }
+
+      return 'GitHub API 요청 제한에 도달했습니다. GITHUB_API_TOKEN(또는 VITE_GITHUB_TOKEN) 설정을 권장합니다.'
     }
     return '이 저장소 정보에 접근할 수 없습니다.'
   }

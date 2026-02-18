@@ -15,6 +15,7 @@ export const Pagination = ({ currentPage, totalPages, onChangePage }: Pagination
     <nav className="pagination" aria-label="저장소 페이지네이션">
       <button
         type="button"
+        className="btn btn-secondary btn-pill"
         onClick={() => onChangePage(currentPage - 1)}
         disabled={currentPage <= 1}
       >
@@ -24,7 +25,7 @@ export const Pagination = ({ currentPage, totalPages, onChangePage }: Pagination
         <button
           key={page}
           type="button"
-          className={page === currentPage ? 'active' : ''}
+          className={`btn btn-secondary btn-pill ${page === currentPage ? 'is-active active' : ''}`}
           onClick={() => onChangePage(page)}
           aria-current={page === currentPage ? 'page' : undefined}
         >
@@ -33,6 +34,7 @@ export const Pagination = ({ currentPage, totalPages, onChangePage }: Pagination
       ))}
       <button
         type="button"
+        className="btn btn-secondary btn-pill"
         onClick={() => onChangePage(currentPage + 1)}
         disabled={currentPage >= totalPages}
       >

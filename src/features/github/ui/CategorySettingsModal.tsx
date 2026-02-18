@@ -115,7 +115,7 @@ export const CategorySettingsModal = ({
             <h2>카테고리 설정</h2>
             <p>생성, 이름변경, 삭제를 이 화면에서 관리합니다.</p>
           </div>
-          <button type="button" onClick={handleClose} aria-label="카테고리 설정 닫기">
+          <button type="button" className="btn btn-secondary" onClick={handleClose} aria-label="카테고리 설정 닫기">
             닫기
           </button>
         </header>
@@ -125,7 +125,7 @@ export const CategorySettingsModal = ({
             type="button"
             role="tab"
             aria-selected={activeTab === 'create'}
-            className={activeTab === 'create' ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeTab === 'create' ? 'is-active active' : ''}`}
             onClick={() => setActiveTab('create')}
           >
             생성
@@ -134,7 +134,7 @@ export const CategorySettingsModal = ({
             type="button"
             role="tab"
             aria-selected={activeTab === 'manage'}
-            className={activeTab === 'manage' ? 'active' : ''}
+            className={`btn btn-ghost btn-pill ${activeTab === 'manage' ? 'is-active active' : ''}`}
             onClick={() => setActiveTab('manage')}
           >
             관리
@@ -162,7 +162,7 @@ export const CategorySettingsModal = ({
                 placeholder="예: 프론트엔드"
                 maxLength={maxNameLength}
               />
-              <button type="submit">카테고리 생성</button>
+              <button type="submit" className="btn btn-primary">카테고리 생성</button>
             </div>
           </form>
         ) : (
@@ -224,19 +224,19 @@ export const CategorySettingsModal = ({
                       }
                       maxLength={maxNameLength}
                     />
-                    <button type="submit">이름변경</button>
+                    <button type="submit" className="btn btn-secondary">이름변경</button>
                   </form>
 
                   <div className="category-delete-zone">
                     {category.isSystem ? (
-                      <button type="button" disabled>
+                      <button type="button" className="btn btn-secondary" disabled>
                         삭제 불가
                       </button>
                     ) : pendingDeleteCategoryId === category.id ? (
                       <>
                         <button
                           type="button"
-                          className="danger-button"
+                          className="btn btn-danger danger-button"
                           onClick={() => {
                             onDeleteCategory(category)
                             setPendingDeleteCategoryId(null)
@@ -244,12 +244,12 @@ export const CategorySettingsModal = ({
                         >
                           삭제 확인
                         </button>
-                        <button type="button" onClick={() => setPendingDeleteCategoryId(null)}>
+                        <button type="button" className="btn btn-secondary" onClick={() => setPendingDeleteCategoryId(null)}>
                           취소
                         </button>
                       </>
                     ) : (
-                      <button type="button" onClick={() => setPendingDeleteCategoryId(category.id)}>
+                      <button type="button" className="btn btn-danger" onClick={() => setPendingDeleteCategoryId(category.id)}>
                         삭제
                       </button>
                     )}

@@ -202,6 +202,7 @@ export const enqueueGithubSummaryJob = async ({
         max_attempts = EXCLUDED.max_attempts,
         updated_at = NOW(),
         status = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 'queued'
           WHEN github_summary_jobs.status IN ('failed', 'dead') THEN 'queued'
           WHEN github_summary_jobs.status = 'running'
             AND (
@@ -211,6 +212,7 @@ export const enqueueGithubSummaryJob = async ({
           ELSE github_summary_jobs.status
         END,
         next_run_at = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead', 'queued') THEN NOW()
           WHEN github_summary_jobs.status IN ('failed', 'dead') THEN NOW()
           WHEN github_summary_jobs.status = 'running'
             AND (
@@ -220,6 +222,7 @@ export const enqueueGithubSummaryJob = async ({
           ELSE github_summary_jobs.next_run_at
         END,
         attempt_count = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN 0
           WHEN github_summary_jobs.status IN ('failed', 'dead') THEN 0
           WHEN github_summary_jobs.status = 'running'
             AND (
@@ -227,6 +230,18 @@ export const enqueueGithubSummaryJob = async ({
               OR github_summary_jobs.locked_at < NOW() - (($5::bigint || ' milliseconds')::interval)
             ) THEN 0
           ELSE github_summary_jobs.attempt_count
+        END,
+        result_summary = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE github_summary_jobs.result_summary
+        END,
+        error_code = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE github_summary_jobs.error_code
+        END,
+        error_message = CASE
+          WHEN $6::boolean = TRUE AND github_summary_jobs.status IN ('succeeded', 'failed', 'dead') THEN NULL
+          ELSE github_summary_jobs.error_message
         END
       RETURNING
         id,
@@ -251,6 +266,7 @@ export const enqueueGithubSummaryJob = async ({
       Math.max(1, Number(maxAttempts) || getGithubSummaryMaxAttempts()),
       JSON.stringify(mergedPayload),
       staleLockMs,
+      Boolean(force),
     ],
   )
 
