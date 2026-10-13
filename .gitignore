@@ -25,3 +25,10 @@ server/.env
 *.sln
 *.sw?
 .run/
+
+# Cloudflare personal build/runtime; never commit credentials
+dist-personal/
+.personal-test-build/
+.wrangler/
+.dev.vars*
+.env.personal*

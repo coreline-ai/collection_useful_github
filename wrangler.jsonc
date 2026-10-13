@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "coreline-free-hosting",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-13",
+  "account_id": "c54acf020e6b634b68321c7c1b4eef4b",
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "dist-personal",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application",
+  },
+  "observability": { "enabled": false },
+  "vars": {
+    "APP_ORIGIN": "https://coreline-free-hosting.corelineailab.workers.dev",
+    "OWNER_GITHUB_ID": "253600811",
+    "GITHUB_CLIENT_ID": "Ov23liQZ50AyqQmMETBm",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "coreline-personal-library",
+      "database_id": "16ed93ef-5baf-44be-9eb4-ce496c4a0778",
+      "migrations_dir": "migrations",
+    },
+  ],
+}

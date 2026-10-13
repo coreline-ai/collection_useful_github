@@ -33,7 +33,15 @@
     "qa:browser-mobile": "bash scripts/qa-browser-mobile.sh",
     "restore:dashboard:chrome": "node scripts/restore-dashboard-from-chrome-localstorage.mjs",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "personal:build": "tsc -p tsconfig.personal.json && vite build --config vite.personal.config.ts",
+    "personal:bundle": "npm run personal:build && wrangler deploy --dry-run --outdir .personal-test-build",
+    "personal:test": "node --experimental-strip-types --test personal-tests/*.checks.ts",
+    "personal:test:integration": "node --test personal-tests/*.checks.mjs",
+    "personal:dev": "wrangler dev --local --ip 127.0.0.1",
+    "personal:deploy": "npm run personal:build && wrangler deploy",
+    "personal:db:local": "wrangler d1 migrations apply DB --local",
+    "personal:db:remote": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
     "dompurify": "^3.3.1",
@@ -43,6 +51,7 @@
     "web-vitals": "^5.1.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
     "@eslint/js": "^9.39.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -59,9 +68,11 @@
     "globals": "^17.3.0",
     "jsdom": "^28.1.0",
     "level": "^10.0.0",
+    "miniflare": "^5.20261006.2-beta",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.56.0",
     "vite": "^7.3.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "wrangler": "^4.150.0"
   }
 }
